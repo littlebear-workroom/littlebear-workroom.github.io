@@ -53,11 +53,19 @@ Deno.serve(async (req) => {
     }
     if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
     const { ws, key, by } = body;
-    const label = LABELS[key];
+    let label = LABELS[key], logKey = key;
     if (!ws || !label) return json({ ok: true, skipped: "not notified" });
-    const { data: last } = await admin.from("push_log").select("sent_at").eq("workspace_id", ws).eq("key", key).maybeSingle();
+    // 寶貝補給品 lives inside the student list: tell the two apart by what changed.
+    if (key === "bear_student_records" && Array.isArray(body.old) && Array.isArray(body.new)) {
+      const strip = (list: any[]) => JSON.stringify(list.map((r) => Object.fromEntries(Object.entries(r || {}).filter(([k]) => !/suppl|diaper/i.test(k)))));
+      if (strip(body.old) === strip(body.new)) {
+        if (JSON.stringify(body.old) === JSON.stringify(body.new)) return json({ ok: true, skipped: "no change" });
+        label = ["寶貝補給品", "supplies"]; logKey = key + "#supplies";
+      }
+    }
+    const { data: last } = await admin.from("push_log").select("sent_at").eq("workspace_id", ws).eq("key", logKey).maybeSingle();
     if (last && Date.now() - new Date(last.sent_at).getTime() < QUIET_MINUTES * 60e3) return json({ ok: true, skipped: "quiet" });
-    await admin.from("push_log").upsert({ workspace_id: ws, key, sent_at: new Date().toISOString() });
+    await admin.from("push_log").upsert({ workspace_id: ws, key: logKey, sent_at: new Date().toISOString() });
     const [{ data: members }, { data: w }, { data: who }] = await Promise.all([
       admin.from("workspace_members").select("user_id").eq("workspace_id", ws),
       admin.from("workspaces").select("name").eq("id", ws).maybeSingle(),
@@ -65,7 +73,7 @@ Deno.serve(async (req) => {
     ]);
     const to = (members || []).map((m: any) => m.user_id).filter((id: string) => id !== by);
     const name = (who as any)?.display_name || "同班老師";
-    const sent = await sendTo(to, { title: `${w?.name || "班級"}有新資料`, body: `${name} 更新了「${label[0]}」，點開看看`, view: label[1], tag: `${ws}:${key}` });
+    const sent = await sendTo(to, { title: `${w?.name || "班級"}有新資料`, body: `${name} 更新了「${label[0]}」，點開看看`, view: label[1], tag: `${ws}:${logKey}` });
     return json({ ok: true, sent });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e) }, 500);

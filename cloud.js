@@ -7,6 +7,7 @@
     supabaseUrl: "https://cwsxlfifpydxmmjsiwzg.supabase.co",
     supabaseKey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7",
     liffId: "2012187193-uL27Ayag",
+    oaBasicId: "", // 熊班 official account, e.g. "@123abcde"
   };
   // Data the whole class shares vs. data that belongs to one teacher.
   const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
@@ -363,6 +364,20 @@
     window.createTeam = createClass;
     window.joinTeam = joinClass;
     window.bearCloud = { finishLogin, pull, push, exportBackup, importBackup, merge, get user() { return user; }, get ws() { return ws; } };
+    const fr = document.getElementById("oaFriend");
+    if (fr && CFG.oaBasicId) { fr.href = "https://line.me/R/ti/p/" + encodeURIComponent(CFG.oaBasicId); fr.hidden = false; }
+    const nt = document.getElementById("notifyTest");
+    if (nt) nt.onclick = async () => {
+      const out = document.getElementById("notifyTestMsg");
+      if (!user) { toast("請先用 LINE 登入"); return; }
+      out.textContent = "傳送中…";
+      try {
+        const { data } = await sb.auth.getSession();
+        const r = await fetch(CFG.supabaseUrl + "/functions/v1/line-notify", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ mode: "test" }) });
+        const b = await r.json();
+        out.textContent = r.ok ? "已傳出，打開 LINE 看看「熊班」的訊息 ♡" : "沒有傳出去：" + (b.error || "請稍後再試");
+      } catch (e) { out.textContent = "沒有傳出去：" + (e.message || e); }
+    };
     const bf = document.getElementById("backupFile");
     if (bf) bf.addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; });
     const be = document.getElementById("backupExport");

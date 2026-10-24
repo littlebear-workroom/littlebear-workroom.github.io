@@ -23,7 +23,10 @@
   const timers = {}, inflight = {};
 
   // ---------- storage hook ----------
+  const KEEP_ALWAYS = ["bear_cloud_meta", "bear_cloud_auth", "bear_login_msg"];
+  let guest = !rawGet.call(LS, "bear_cloud_auth");
   Storage.prototype.setItem = function (k, v) {
+    if (this === LS && guest && String(k).startsWith("bear_") && !KEEP_ALWAYS.includes(k) && !String(k).startsWith("bear_cloud")) return; // signed out: keep only in memory
     rawSet.call(this, k, v);
     if (this === LS && !muted && user && (SHARED.includes(k) || PERSONAL.includes(k))) queuePush(k);
   };
@@ -198,6 +201,7 @@
     const { data, error } = await sb.auth.verifyOtp({ token_hash, type: "magiclink" });
     if (error) throw error;
     user = data.user;
+    setGuest(false);
     report("步驟 3／3：登入成功");
     try { sessionStorage.removeItem("bear_login_msg"); } catch {}
     await afterSignIn(true);
@@ -214,8 +218,10 @@
   async function signOut() {
     await sb.auth.signOut(); user = null; ws = null; if (channel) sb.removeChannel(channel);
     try { if (window.liff && liff.isLoggedIn && liff.isLoggedIn()) liff.logout(); } catch {}
-    const m = meta(); m.ws = null; saveMeta(m);
-    renderCloudUI(); toast("已登出，資料仍保留在這台裝置");
+    const drop = []; for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k.startsWith("bear_") && !k.startsWith("bear_cloud")) drop.push(k); }
+    drop.forEach((k) => LS.removeItem(k)); LS.removeItem("bear_cloud_meta");
+    toast("已登出，你的資料都安全存在雲端");
+    setTimeout(() => location.reload(), 900);
   }
   async function afterSignIn(fresh) {
     const list = await loadWorkspaces();
@@ -227,6 +233,41 @@
     const recently = Number(sessionStorage.getItem("bear_cloud_reloaded") || 0) > Date.now() - 4000;
     await pull({ reloadIfChanged: !recently });
     if (fresh) toast(`歡迎，${escH(user.user_metadata?.name || "老師")}！資料會自動同步`);
+  }
+
+  // ---------- guest mode: only show what the app can do ----------
+  const OPEN_VIEWS = ["home", "menu", "login"];
+  let baseSwitch = null;
+  function setGuest(on) {
+    guest = on;
+    document.body.classList.toggle("guest", on);
+    const cv = typeof currentView !== "undefined" ? currentView : "home"; if (on && !OPEN_VIEWS.includes(cv) && baseSwitch) baseSwitch("home");
+  }
+  function installGuestUI() {
+    baseSwitch = window.switchView;
+    window.switchView = function (v) {
+      if (guest && !OPEN_VIEWS.includes(v)) { toast("請先用 LINE 登入，登入後就能使用這個功能"); return baseSwitch("login"); }
+      return baseSwitch(v);
+    };
+    const css = document.createElement("style");
+    css.textContent = `body.guest #fab{display:none!important}body.guest #view-home>:not(.hello):not(#guestIntro){display:none!important}#guestIntro,#guestMenuNote{display:none}body.guest #guestIntro,body.guest #guestMenuNote{display:block}body.guest .menu-tile{position:relative}body.guest .menu-tile::after{content:"登入後使用";position:absolute;top:8px;right:10px;font-size:9px;color:#a86f70;background:#f7e8e6;border-radius:999px;padding:2px 7px}body.guest .menu-tile .tile-icon{filter:grayscale(.35)}#guestIntro .menu-grid{margin-top:14px}`;
+    document.head.appendChild(css);
+    const hello = document.querySelector("#view-home .hello"), grid = document.querySelector("#view-menu .menu-grid");
+    if (hello && !document.getElementById("guestIntro")) {
+      const intro = document.createElement("div");
+      intro.id = "guestIntro"; intro.className = "lesson-card"; intro.style.marginTop = "14px";
+      intro.innerHTML = `<h3 style="margin:0 0 6px;font-size:17px">歡迎來到小熊工作室</h3><p class="small-note" style="line-height:1.7;margin:0 0 12px">幼兒園老師的工作小幫手。用 LINE 登入後就能開始使用，資料會存到雲端，換手機也看得到，同班老師還能一起同步。</p><button type="button" class="primary" id="guestLogin" style="background:#06C755;color:#fff;display:flex;justify-content:center;align-items:center;gap:10px"><span class="line-mark">LINE</span>使用 LINE 帳號登入</button><div class="small-note" style="margin:16px 2px 0;font-weight:700;color:#8f706b">登入後可以使用的功能</div><div class="menu-grid">${grid ? grid.innerHTML : ""}</div>`;
+      hello.after(intro);
+      intro.querySelector("#guestLogin").onclick = () => startLogin();
+    }
+    if (grid && !document.getElementById("guestMenuNote")) {
+      const note = document.createElement("div");
+      note.id = "guestMenuNote"; note.className = "motor-warn"; note.style.marginTop = "0";
+      note.innerHTML = `還沒登入，只能先看看有哪些功能。<button type="button" class="link-btn" style="font-size:12px">用 LINE 登入</button>`;
+      note.querySelector("button").onclick = () => startLogin();
+      grid.before(note);
+    }
+    setGuest(guest);
   }
 
   // ---------- UI on the 登入 and 班級共享 pages ----------
@@ -317,6 +358,7 @@
     const css = document.createElement("style");
     css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
     document.head.appendChild(css);
+    installGuestUI();
     window.startLineLogin = startLogin;
     window.createTeam = createClass;
     window.joinTeam = joinClass;
@@ -325,10 +367,11 @@
     if (bf) bf.addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; });
     const be = document.getElementById("backupExport");
     if (be) be.onclick = exportBackup;
-    if (!window.supabase) { renderCloudUI(); return; }
+    if (!window.supabase) { setGuest(true); renderCloudUI(); return; }
     sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
     const { data } = await sb.auth.getSession();
     user = data.session?.user || null;
+    setGuest(!user);
     if (user) { try { await afterSignIn(false); } catch (e) { console.error(e); setStatus("暫時無法同步，連上網路後會自動重試"); } }
     else {
       renderCloudUI();

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#fbf5ef"><title>小熊工作室｜幼兒園工作管理</title>
 <style>
 :root{--bg:#fbf6f0;--paper:#fffdf9;--ink:#554943;--muted:#9a8980;--pink:#efd6d5;--pink2:#f7e8e6;--rose:#b77979;--sage:#dfe8d9;--sageink:#728369;--butter:#f5e8bd;--lav:#e9e3f1;--line:#eee3da;--shadow:0 8px 24px #8264510c}
@@ -327,6 +327,18 @@
 .rc-status{margin-top:9px;font-size:12px;color:#728369;background:#f1f5ed;border-radius:10px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;line-height:1.6}
 .rc-status.due{color:#8f6d2a;background:#fdf6e4}.rc-status.late{color:#c7383e;background:#fdecec}
 .rc-foot{display:flex;gap:10px;margin-top:6px}
+
+/* Phone form fixes: iOS Safari draws date/time inputs at its own width, so pin every control to its box */
+input,select,textarea{max-width:100%;box-sizing:border-box}
+.two>*,.rs-top>*,.rt-times>*,.md-line>*,.cal-row-top>*,.cal-row-bottom>*,.theme-add>*,.fm-optedit>*,.map-member>*,.map-add>*{min-width:0}
+input[type=date],input[type=time],input[type=month],input[type=datetime-local]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;min-height:44px;line-height:1.3;text-align:left;background-color:#fffdf9;color:var(--ink)}
+input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value,input[type=month]::-webkit-date-and-time-value{text-align:left;margin:0;min-height:1.3em}
+input[type=date]::-webkit-calendar-picker-indicator,input[type=time]::-webkit-calendar-picker-indicator{opacity:.55;margin-left:4px}
+.field input,.field select{min-height:44px}
+.field select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#a39287 50%),linear-gradient(135deg,#a39287 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:30px}
+.rt-times input,.rs-top input,.md-line input,.cal-row-top input[type=date]{min-height:40px}
+.cal-row-top{flex-wrap:wrap}.cal-row-top input[type=date]{flex:1 1 120px}
+.rs-top{flex-wrap:wrap}.rs-top select{flex:1 1 100%}
 </style></head>
 <body>
 <div class="app">

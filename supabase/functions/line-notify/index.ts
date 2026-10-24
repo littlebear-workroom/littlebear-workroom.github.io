@@ -25,6 +25,20 @@ const diff = (a: string, b: string) => Math.round((dOf(b).getTime() - dOf(a).get
 const md = (iso: string) => { const d = dOf(iso); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}（週${WD[d.getUTCDay()]}）`; };
 const hm = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ""); return m ? +m[1] * 60 + +m[2] : null; };
 
+// ---------- 國定假日與補假（老師見紅就休）----------
+const holCache: Record<string, Set<string>> = {};
+async function isHoliday(iso: string) {
+  const y = iso.slice(0, 4);
+  if (!holCache[y]) {
+    try {
+      const r = await fetch(`https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/${y}.json`);
+      const list = r.ok ? await r.json() : [];
+      holCache[y] = new Set(list.filter((x: any) => x.isHoliday).map((x: any) => `${x.date.slice(0, 4)}-${x.date.slice(4, 6)}-${x.date.slice(6, 8)}`));
+    } catch { return false; }
+  }
+  return holCache[y].has(iso);
+}
+
 // ---------- 例行公事 (same rules as the web page) ----------
 type Chore = { id: string; title: string; type: string; wd?: number; anchor?: string; day?: number; dates?: string[]; weekdaysOnly?: boolean; lead?: number; enabled?: boolean; created: string; done?: Record<string, string> };
 const monday = (iso: string) => addDays(iso, -((dOf(iso).getUTCDay() + 6) % 7));
@@ -59,10 +73,10 @@ type Data = { tasks?: any[]; chores?: Chore[]; cal?: any[]; prefs?: any };
 function dailyText(d: Data, T: string, withTomorrow: boolean) {
   const tasks = (d.tasks || []).filter((t) => t.date === T && !t.done);
   const chores = activeChores(d.chores || [], T);
-  const cal = (d.cal || []).filter((e) => e.mine && (e.date === T || (e.end && e.date <= T && T <= e.end)));
+  const cal = (d.cal || []).filter((e) => e.mine && !e.monthOnly && (e.date === T || (e.end && e.date <= T && T <= e.end)));
   const tm = addDays(T, 1);
   const tTasks = withTomorrow ? (d.tasks || []).filter((t) => t.date === tm && !t.done) : [];
-  const tCal = withTomorrow ? (d.cal || []).filter((e) => e.mine && e.date === tm) : [];
+  const tCal = withTomorrow ? (d.cal || []).filter((e) => e.mine && !e.monthOnly && e.date === tm) : [];
   if (!tasks.length && !chores.length && !cal.length && !tTasks.length && !tCal.length) return "";
   const L: string[] = [`小熊工作提醒 ♡ ${md(T)}`];
   if (tasks.length) L.push("", `今天還沒完成的待辦（${tasks.length}）`, ...tasks.slice(0, 8).map((t) => `・${t.title}${t.time ? `（${t.time}）` : ""}`), ...(tasks.length > 8 ? [`…還有 ${tasks.length - 8} 件`] : []));
@@ -135,7 +149,7 @@ Deno.serve(async (req) => {
       for (const p of people || []) {
         const d = await loadData(p.id), pr = d.prefs;
         if (!pr) continue; // teacher hasn't saved notification settings yet
-        const weekend = now.wd === 0 || now.wd === 6;
+        const weekend = now.wd === 0 || now.wd === 6 || (await isHoliday(now.iso));
         if (weekend && pr.weekendOff !== false) continue;
         const due = (t: string | undefined, def: string) => { const m = hm(t || def); return m !== null && now.minutes >= m && now.minutes < m + 60; };
         if (pr.incomplete !== false && due(pr.time, "17:30") && !(await alreadySent(p.id, "daily", now.iso))) {

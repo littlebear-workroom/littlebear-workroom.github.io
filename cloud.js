@@ -597,6 +597,12 @@
     sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
     const { data } = await sb.auth.getSession();
     user = data.session?.user || null;
+    // Back from LINE for a login started in the home-screen app: hand it to the app even if this browser is already signed in.
+    if (BOOT_PAIR && !myPairs().includes(BOOT_PAIR) && CFG.liffId && /[?&](code|liffClientId|liff\.state|pair)=/.test(location.search)) {
+      setGuest(!user); renderCloudUI();
+      try { report("正在把登入交給主畫面的 App…"); await initLiff(); if (liff.isLoggedIn()) { await exchange(liff.getIDToken()); return; } }
+      catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); }
+    }
     setGuest(!user);
     if (user) { try { await afterSignIn(false); } catch (e) { console.error(e); setStatus("暫時無法同步，連上網路後會自動重試"); } }
     else {

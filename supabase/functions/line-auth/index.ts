@@ -20,13 +20,23 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "use POST" }, 405);
   try {
-    const { idToken, pair, claim } = await req.json();
+    const { idToken, pair, claim, code } = await req.json();
     const okNonce = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9]{24,64}$/.test(v);
+    const fresh = () => new Date(Date.now() - 15 * 60e3).toISOString();
     // The home-screen app asks whether its login (finished in Safari) is ready.
     if (claim !== undefined) {
-      if (!okNonce(claim)) return json({ error: "bad code" }, 400);
-      const { data } = await admin.from("login_pairs").delete().eq("nonce", claim).gte("created_at", new Date(Date.now() - 15 * 60e3).toISOString()).select("token_hash").maybeSingle();
-      return json(data ? { token_hash: data.token_hash } : { pending: true });
+      const list = (Array.isArray(claim) ? claim : [claim]).filter(okNonce).slice(0, 6);
+      if (!list.length) return json({ error: "bad code" }, 400);
+      const { data } = await admin.from("login_pairs").delete().in("nonce", list).gte("created_at", fresh()).select("token_hash, created_at");
+      const best = (data || []).sort((a: any, b: any) => b.created_at.localeCompare(a.created_at))[0];
+      return json(best ? { token_hash: best.token_hash } : { pending: true });
+    }
+    // Typed-in 6-digit code from the Safari page.
+    if (code !== undefined) {
+      if (!/^\d{6}$/.test(String(code))) return json({ error: "請輸入 6 位數字" }, 400);
+      await new Promise((r) => setTimeout(r, 400)); // slow down guessing
+      const { data } = await admin.from("login_pairs").delete().eq("code", String(code)).gte("created_at", new Date(Date.now() - 10 * 60e3).toISOString()).select("token_hash").maybeSingle();
+      return data ? json({ token_hash: data.token_hash }) : json({ error: "登入碼不對或已經過期，請在 Safari 重新登入一次" }, 404);
     }
     if (!idToken) return json({ error: "缺少 LINE 登入資訊" }, 400);
     const channelId = Deno.env.get("LINE_CHANNEL_ID");
@@ -69,8 +79,9 @@ Deno.serve(async (req) => {
     if (okNonce(pair)) {
       // Login was finished outside the home-screen app: park it for the app to pick up.
       await admin.from("login_pairs").delete().lt("created_at", new Date(Date.now() - 15 * 60e3).toISOString());
-      await admin.from("login_pairs").upsert({ nonce: pair, token_hash: link.properties.hashed_token, created_at: new Date().toISOString() });
-      return json({ paired: true, name: info.name ?? "" });
+      const six = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
+      await admin.from("login_pairs").upsert({ nonce: pair, token_hash: link.properties.hashed_token, code: six, created_at: new Date().toISOString() });
+      return json({ paired: true, name: info.name ?? "", code: six });
     }
     return json({ token_hash: link.properties.hashed_token, email, name: info.name ?? "", picture: info.picture ?? "" });
   } catch (e) {

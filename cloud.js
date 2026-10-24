@@ -189,6 +189,7 @@
     if (ws) { const changed = await pull({ reloadIfChanged: false }); if (upload) for (const k of SHARED) if (readLocal(k) !== undefined) await push(k); if (changed) reloadApp(); }
     renderCloudUI();
     renderAppCards();
+    renderPairCodeBox();
   }
 
   // ---------- LINE sign-in ----------
@@ -204,7 +205,7 @@
     report("步驟 2／3：LINE 登入完成，正在建立你的帳號…");
     // Started from the home-screen app but LINE brought us back to Safari: hand the login to the app.
     const pair = BOOT_PAIR;
-    const handOff = /^[A-Za-z0-9]{24,64}$/.test(pair || "") && pair !== rawGet.call(LS, "bear_cloud_pair");
+    const handOff = /^[A-Za-z0-9]{24,64}$/.test(pair || "") && !myPairs().includes(pair);
     const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify(handOff ? { idToken, pair } : { idToken }) });
     const body = await res.json();
     if (res.status === 401 && window.liff && !sessionStorage.getItem("bear_login_retry")) {
@@ -212,7 +213,7 @@
       try { sessionStorage.setItem("bear_login_retry", "1"); } catch {}
       report("LINE 登入需要重新確認，正在重新連到 LINE…");
       try { liff.logout(); } catch {}
-      liff.login({ redirectUri: location.origin + location.pathname + (handOff ? "?pair=" + pair : (isApp() && rawGet.call(LS, "bear_cloud_pair") ? "?pair=" + rawGet.call(LS, "bear_cloud_pair") : "")) });
+      liff.login({ redirectUri: location.origin + location.pathname + (handOff ? "?pair=" + pair : (isApp() ? "?pair=" + currentPair() : "")) });
       return;
     }
     try { sessionStorage.removeItem("bear_login_retry"); sessionStorage.removeItem("bear_boot_pair"); } catch {}
@@ -222,24 +223,60 @@
       history.replaceState(null, "", location.pathname);
       const o = document.createElement("div");
       o.style.cssText = "position:fixed;inset:0;z-index:999;background:#fbf6f0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center;color:#5d4b44";
-      o.innerHTML = `<img src="/icon-192.png" width="96" height="96" alt="" style="border-radius:22px;box-shadow:0 8px 24px #8264511f"><h2 style="margin:6px 0 0;font-size:21px">LINE 登入完成 ♡</h2><p style="margin:0;font-size:14px;line-height:1.8;color:#8d786d">現在可以關掉這個瀏覽器，<br>回到手機主畫面，打開<b>小熊工作室</b> App，<br>它會自動幫你登入。</p><p style="margin:8px 0 0;font-size:12px;color:#a39287">只有第一次需要這樣，之後打開 App 都會保持登入。</p>`;
+      o.innerHTML = `<img src="/icon-192.png" width="96" height="96" alt="" style="border-radius:22px;box-shadow:0 8px 24px #8264511f"><h2 style="margin:6px 0 0;font-size:21px">LINE 登入完成 ♡</h2><p style="margin:0;font-size:14px;line-height:1.8;color:#8d786d">現在可以關掉這個瀏覽器，<br>回到手機主畫面，打開<b>小熊工作室</b> App，<br>它會自動幫你登入。</p>${body.code ? `<div style="margin-top:6px;font-size:12px;color:#8d786d">如果 App 沒有自動登入，在 App 的登入頁輸入這組登入碼：</div><div style="font-size:34px;font-weight:800;letter-spacing:8px;color:#a66f72;background:#f6e9e5;border-radius:16px;padding:10px 18px">${body.code}</div><div style="font-size:11px;color:#a39287">10 分鐘內有效</div>` : ""}<p style="margin:8px 0 0;font-size:12px;color:#a39287">只有第一次需要這樣，之後打開 App 都會保持登入。</p>`;
       document.body.appendChild(o);
       return;
     }
-    try { LS.removeItem("bear_cloud_pair"); } catch {}
+    clearPairs();
     return finishLogin(body);
   }
   function idTokenStale() { try { const d = liff.getDecodedIDToken(); return !d || !d.exp || d.exp * 1000 < Date.now() + 60e3; } catch { return true; } }
   function newNonce() { const a = new Uint8Array(24); crypto.getRandomValues(a); return Array.from(a, (b) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join(""); }
+  // Hand-off codes this app is waiting on (kept for 15 minutes; tapping login again reuses the latest one).
+  const PAIR_MS = 15 * 60e3;
+  function pairList() { try { return (JSON.parse(rawGet.call(LS, "bear_cloud_pairs") || "[]") || []).filter((p) => p && p.n && Date.now() - p.t < PAIR_MS); } catch { return []; } }
+  const myPairs = () => pairList().map((p) => p.n);
+  function currentPair() {
+    const l = pairList(), last = l[l.length - 1];
+    if (last && Date.now() - last.t < 10 * 60e3) return last.n;
+    const n = newNonce(); l.push({ n, t: Date.now() }); rawSet.call(LS, "bear_cloud_pairs", JSON.stringify(l.slice(-6))); return n;
+  }
+  function clearPairs() { try { LS.removeItem("bear_cloud_pairs"); LS.removeItem("bear_cloud_pair"); } catch {} }
+  let pairTimer = null;
+  function watchPairs() {
+    claimPairedLogin();
+    if (pairTimer) return;
+    const started = Date.now();
+    pairTimer = setInterval(() => { if (user || !myPairs().length || Date.now() - started > PAIR_MS) { clearInterval(pairTimer); pairTimer = null; return; } if (!document.hidden) claimPairedLogin(); }, 3000);
+  }
+  function renderPairCodeBox() {
+    let box = document.getElementById("pairCodeBox");
+    const anchor = document.getElementById("cloudAccount");
+    if (!anchor) return;
+    if (!box) { box = document.createElement("div"); box.id = "pairCodeBox"; anchor.after(box); }
+    box.hidden = !(isApp() && !user);
+    if (box.hidden) return;
+    box.innerHTML = `<div style="background:#fbf3ee;border-radius:14px;padding:12px;margin-top:12px"><strong style="font-size:12px;color:#6e5d54">已經在 Safari 登入了？</strong><p class="small-note" style="margin:4px 0 8px;line-height:1.6">輸入 Safari 畫面上的 6 位數登入碼：</p><div style="display:flex;gap:8px"><input id="pairCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="例如 123456" style="flex:1;min-width:0;border:1px solid #eadbd1;border-radius:12px;padding:10px 12px;font-size:16px;letter-spacing:3px;background:#fffdf9"><button type="button" class="primary" id="pairCodeGo" style="width:auto;padding:0 18px;margin:0">登入</button></div></div>`;
+    box.querySelector("#pairCodeGo").onclick = async () => {
+      const v = box.querySelector("#pairCode").value.replace(/\D/g, "");
+      if (v.length !== 6) return toast("請輸入 6 位數字");
+      try {
+        const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify({ code: v }) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.token_hash) return toast(body.error || "登入失敗");
+        clearPairs(); await finishLogin(body); box.hidden = true;
+      } catch (e) { toast("登入失敗：" + (e.message || e)); }
+    };
+  }
   let claiming = false;
   async function claimPairedLogin() {
-    const n = rawGet.call(LS, "bear_cloud_pair");
-    if (!n || user || claiming || !sb) return;
+    const n = myPairs();
+    if (!n.length || user || claiming || !sb) return;
     claiming = true;
     try {
       const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify({ claim: n }) });
       const body = await res.json().catch(() => ({}));
-      if (body.token_hash) { LS.removeItem("bear_cloud_pair"); report("步驟 3／3：收到 LINE 登入，正在登入…"); await finishLogin(body); }
+      if (body.token_hash) { clearPairs(); report("步驟 3／3：收到 LINE 登入，正在登入…"); await finishLogin(body); }
     } catch (e) { console.warn(e); } finally { claiming = false; }
   }
   async function finishLogin({ token_hash }) {
@@ -261,7 +298,7 @@
       if (!liff.isLoggedIn()) {
         report("步驟 1／3：前往 LINE 登入頁…");
         let redirectUri = location.origin + location.pathname;
-        if (isApp()) { const n = newNonce(); rawSet.call(LS, "bear_cloud_pair", n); redirectUri += "?pair=" + n; report("登入完成後，如果停在 Safari，請回到這個 App，它會自動登入。"); }
+        if (isApp()) { redirectUri += "?pair=" + currentPair(); watchPairs(); report("登入完成後，如果停在 Safari，請回到這個 App，它會自動登入。"); }
         liff.login({ redirectUri }); return;
       }
       await exchange(liff.getIDToken());
@@ -574,11 +611,8 @@
     const v0 = new URLSearchParams(location.search).get("view");
     if (v0 && window.switchView) { switchView(v0); history.replaceState(null, "", location.pathname); }
     else if (/[?&]v=\d+/.test(location.search) && !/[?&](code|liffClientId|liff\.state|pair)=/.test(location.search)) history.replaceState(null, "", location.pathname);
-    if (!user && rawGet.call(LS, "bear_cloud_pair")) {
-      claimPairedLogin();
-      const t = setInterval(() => { if (user || !rawGet.call(LS, "bear_cloud_pair")) return clearInterval(t); if (!document.hidden) claimPairedLogin(); }, 3000);
-      setTimeout(() => clearInterval(t), 15 * 60e3);
-    }
+    if (!user && myPairs().length) watchPairs();
+    renderPairCodeBox();
     window.addEventListener("online", flushDirty);
     document.addEventListener("visibilitychange", () => { if (!document.hidden && !user) claimPairedLogin(); if (!document.hidden && user) flushDirty().then(() => pull({ reloadIfChanged: false }).then((c) => c && needsRefresh("雲端有新的資料"))); });
   }

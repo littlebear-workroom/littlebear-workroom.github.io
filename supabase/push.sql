@@ -32,3 +32,6 @@ create table if not exists public.login_pairs (
 alter table public.login_pairs enable row level security;
 grant all on public.login_pairs to service_role;
 -- (the trigger that calls the web-push function is created separately because it contains the private secret)
+-- A 6-digit code shown in Safari, so the teacher can type it into the app if the automatic hand-off misses.
+alter table public.login_pairs add column if not exists code text;
+create index if not exists login_pairs_code on public.login_pairs(code);

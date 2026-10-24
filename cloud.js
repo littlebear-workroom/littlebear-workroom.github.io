@@ -13,6 +13,13 @@
   // Data the whole class shares vs. data that belongs to one teacher.
   const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
   const PERSONAL = ["bear_tasks", "bear_trainings", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans"];
+  // Read before LINE's SDK tidies up the address bar: set when the login was started from the home-screen app.
+  const BOOT_PAIR = (() => {
+    const q = new URLSearchParams(location.search), st = decodeURIComponent(q.get("liff.state") || "");
+    let v = q.get("pair") || ((/pair=([A-Za-z0-9]{24,64})/.exec(st) || [])[1]) || "";
+    try { if (v) sessionStorage.setItem("bear_boot_pair", v); else v = sessionStorage.getItem("bear_boot_pair") || ""; } catch {}
+    return v;
+  })();
   const LS = window.localStorage;
   const rawSet = Storage.prototype.setItem;
   const rawGet = Storage.prototype.getItem;
@@ -196,7 +203,7 @@
     if (!idToken) throw new Error("LINE 沒有給登入證明（ID token），請確認 LIFF 的 Scopes 有勾 openid");
     report("步驟 2／3：LINE 登入完成，正在建立你的帳號…");
     // Started from the home-screen app but LINE brought us back to Safari: hand the login to the app.
-    const pair = new URLSearchParams(location.search).get("pair") || (new URLSearchParams(location.search).get("liff.state") || "").replace(/^.*pair=([A-Za-z0-9]+).*$/, "$1");
+    const pair = BOOT_PAIR;
     const handOff = /^[A-Za-z0-9]{24,64}$/.test(pair || "") && pair !== rawGet.call(LS, "bear_cloud_pair");
     const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify(handOff ? { idToken, pair } : { idToken }) });
     const body = await res.json();
@@ -208,7 +215,7 @@
       liff.login({ redirectUri: location.origin + location.pathname + (handOff ? "?pair=" + pair : (isApp() && rawGet.call(LS, "bear_cloud_pair") ? "?pair=" + rawGet.call(LS, "bear_cloud_pair") : "")) });
       return;
     }
-    try { sessionStorage.removeItem("bear_login_retry"); } catch {}
+    try { sessionStorage.removeItem("bear_login_retry"); sessionStorage.removeItem("bear_boot_pair"); } catch {}
     if (!res.ok) throw new Error(body.error || "登入失敗");
     if (body.paired) {
       report("LINE 登入完成！請回到手機主畫面的「小熊工作室」App，它會自動登入。");

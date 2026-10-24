@@ -377,14 +377,14 @@
 <div class="lesson-card" style="padding:20px"><div style="text-align:center;font-size:48px;margin:6px 0 12px"><span class=illus-bear aria-hidden=true></span></div><h3 style="text-align:center;margin:0 0 7px">歡迎回來</h3><p style="text-align:center;color:var(--muted);font-size:12px;line-height:1.7;margin:0 0 18px">用 LINE 帳號安全登入，讓你的班表、待辦與教案在授權的班級成員間同步。</p>
 <button class="primary line-login" onclick="startLineLogin()" style="background:#06C755;color:white;display:flex;justify-content:center;align-items:center;gap:10px"><span class="line-mark">LINE</span>使用 LINE 帳號登入</button>
 <div id="cloudAccount" style="margin-top:12px"></div>
-<div style="background:#fbf3ee;border-radius:14px;padding:12px;margin-top:14px"><strong style="font-size:12px">登入後可以</strong><p style="font-size:11px;color:var(--muted);line-height:1.8;margin:7px 0 0">同步自己加入的班級資料<br>邀請同班老師一起管理工作<br>設定 LINE 到期提醒與每日總結</p></div></div>
-<div class="lesson-card"><div class="lesson-top"><div class="lesson-icon"><span class=illus-document aria-hidden=true></span></div><div><h4>資料備份與搬家</h4><p>想把舊的桌面檔案資料搬到網站：在舊檔案的登入頁按「下載備份」，再回到這裡按「匯入備份」，選剛剛下載的檔案就好。</p></div></div><div class="rt-actions" style="margin-top:12px"><button type="button" class="outline-btn" id="backupExport">下載備份</button><label class="outline-btn" for="backupFile" style="cursor:pointer">匯入備份</label><input id="backupFile" type="file" accept=".json,application/json" hidden></div></div>
-<div class="lesson-card" id="profileCard"><div class="lesson-top"><div class="lesson-icon"><span class=illus-bear aria-hidden=true></span></div><div><h4>我的老師資料</h4><p>登入 LINE 後填一次就好。之後上傳的行事曆或工作分配表，只要出現你的本名、暱稱或班級，就會自動加到你的待辦和行事曆。</p></div></div>
+<div id="loginPerks" style="background:#fbf3ee;border-radius:14px;padding:12px;margin-top:14px"><strong style="font-size:12px">登入後可以</strong><p style="font-size:11px;color:var(--muted);line-height:1.8;margin:7px 0 0">同步自己加入的班級資料<br>邀請同班老師一起管理工作<br>設定 LINE 到期提醒與每日總結</p></div></div>
+<div class="lesson-card" id="backupCard" hidden><div class="lesson-top"><div class="lesson-icon"><span class=illus-document aria-hidden=true></span></div><div><h4>資料備份與搬家</h4><p>想把舊的桌面檔案資料搬到網站：在舊檔案的登入頁按「下載備份」，再回到這裡按「匯入備份」，選剛剛下載的檔案就好。</p></div></div><div class="rt-actions" style="margin-top:12px"><button type="button" class="outline-btn" id="backupExport">下載備份</button><label class="outline-btn" for="backupFile" style="cursor:pointer">匯入備份</label><input id="backupFile" type="file" accept=".json,application/json" hidden></div></div>
+<div class="lesson-card" id="profileCard" hidden><div class="lesson-top"><div class="lesson-icon"><span class=illus-bear aria-hidden=true></span></div><div><h4>我的老師資料</h4><p>登入 LINE 後填一次就好。之後上傳的行事曆或工作分配表，只要出現你的本名、暱稱或班級，就會自動加到你的待辦和行事曆。</p></div></div>
 <div class="field" style="margin-top:12px"><label>班級</label><input id="pfClass" list="pfClassList" maxlength="20" placeholder="例如：黑琵班"><datalist id="pfClassList"></datalist></div>
 <div class="two"><div class="field"><label>本名</label><input id="pfReal" maxlength="20" placeholder="例如：王小美"></div><div class="field"><label>暱稱（可以填多個）</label><input id="pfNick" maxlength="60" placeholder="例如：小美老師、Mei"></div></div>
 <label class="supply-check-label" style="font-size:12px;color:#6e5d54"><input id="pfAll" type="checkbox"> 寫「全體老師」的工作也算我的</label>
 <button class="primary" type="button" onclick="saveProfile()" style="margin-top:10px">保存我的資料</button><p class="small-note" id="pfNote" style="line-height:1.7;margin-top:8px"></p></div>
-<div class="lesson-card"><div class="lesson-top"><div class="lesson-icon"><span class=illus-heart aria-hidden=true></span></div><div><h4>已經有班級邀請碼？</h4><p>登入後輸入同事分享的邀請碼，就能申請加入同一個班級工作空間。</p></div></div><button class="primary" data-goto="team" onclick="switchView('team')" style="margin-top:13px">前往班級共享設定</button></div>
+<div class="lesson-card" id="inviteCard" hidden><div class="lesson-top"><div class="lesson-icon"><span class=illus-heart aria-hidden=true></span></div><div><h4>已經有班級邀請碼？</h4><p>登入後輸入同事分享的邀請碼，就能申請加入同一個班級工作空間。</p></div></div><button class="primary" data-goto="team" onclick="switchView('team')" style="margin-top:13px">前往班級共享設定</button></div>
 </section>
 <section class="view" id="view-schedule"><h2 class="page-title">班表管理 <span class=illus-clock aria-hidden=true></span></h2><p class="page-sub">記下今天幾點上班、幾點下班，以及當天的職務。</p>
 <div class="section-head"><h3>我的班表</h3><button class="outline-btn" onclick="openSchedule()">＋ 新增班表</button></div><div id="scheduleList"></div>
@@ -1510,5 +1510,5 @@ window.addEventListener("error", function() {
  <div class="student-modal-panel"><div class="student-modal-head"><div><div class="eyebrow">MY LITTLE WORKROOM</div><h2 id="studentDetailTitle">寶貝資料</h2></div><button class="modal-close" onclick="closeStudentDetail()" aria-label="關閉">×</button></div><div id="studentDetailBody"></div></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="cloud.js?v=4"></script>
+<script src="cloud.js?v=5"></script>
 </body></html>

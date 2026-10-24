@@ -238,6 +238,8 @@
     const box = document.getElementById("cloudAccount"), team = document.getElementById("cloudTeam");
     if (!box || !team) return;
     const lb = document.querySelector(".line-login"); if (lb) lb.style.display = user ? "none" : "flex";
+    ["backupCard", "profileCard", "inviteCard"].forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = !user; });
+    const perks = document.getElementById("loginPerks"); if (perks) perks.hidden = !!user;
     if (!user) {
       box.innerHTML = `<p class="small-note" style="line-height:1.7;margin:0">登入後，資料會存到雲端，換手機或電腦也看得到；同班老師加入同一個班級後會自動同步。</p><p class="small-note" id="cloudStatus" style="margin:8px 0 0;color:#a86f70;line-height:1.6;overflow-wrap:anywhere"></p>`;
       const last = sessionStorage.getItem("bear_login_msg"); if (last) setStatus(last);

@@ -334,6 +334,36 @@
     toast(`已加入「${escH(data.name)}」，班級資料會自動同步`);
   }
 
+  // ---------- AI reading of photos (Claude, via the ai-read function) ----------
+  function toJpeg(src) {
+    const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height, sc = Math.min(1, 1600 / Math.max(w, h));
+    const c = document.createElement("canvas"); c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+    const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height); x.drawImage(src, 0, 0, c.width, c.height);
+    return { media_type: "image/jpeg", data: c.toDataURL("image/jpeg", 0.88).split(",")[1] };
+  }
+  async function pdfPages(buf, max = 4) {
+    await loadLib(PDFJS_URL, () => window.pdfjsLib); pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise, out = [];
+    for (let p = 1; p <= Math.min(pdf.numPages, max); p++) {
+      const page = await pdf.getPage(p), vp = page.getViewport({ scale: 2 }), c = document.createElement("canvas");
+      c.width = vp.width; c.height = vp.height; const cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: cx, viewport: vp }).promise; out.push(c);
+    }
+    return out;
+  }
+  async function aiRead(kind, sources, context, say) {
+    if (!user || !sb) throw new Error("請先登入");
+    const images = sources.slice(0, 4).map(toJpeg);
+    (say || (() => {}))("AI 正在讀圖，大約需要 20～60 秒，請稍等…");
+    const { data } = await sb.auth.getSession();
+    const res = await fetch(CFG.supabaseUrl + "/functions/v1/ai-read", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ kind, images, context }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) throw new Error(body.error || "AI 讀圖失敗");
+    (say || (() => {}))("AI 讀完了，請檢查下面的內容");
+    return body.data;
+  }
+  window.bearAI = { read: aiRead, pdfPages, get ready() { return !!user; } };
+
   // ---------- backup (moving data from the old desktop file) ----------
   function exportBackup() {
     const out = {};

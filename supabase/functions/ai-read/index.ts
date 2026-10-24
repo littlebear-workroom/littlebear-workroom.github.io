@@ -18,6 +18,30 @@ const arr = (items: unknown) => ({ type: "array", items });
 const slot = obj({ start: { ...str, description: "HH:MM 24-hour" }, end: { ...str, description: "HH:MM 24-hour, empty if not shown" }, name: str });
 
 const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textOnly?: boolean; effort?: string }> = {
+  bus: {
+    textOnly: true,
+    effort: "medium",
+    schema: obj({
+      riders: arr(obj({
+        route: { ...str, description: "車次 as written, e.g. A車 / 1號車 / 南線; empty if the list has only one bus and no name" },
+        session: { type: "string", enum: ["am", "pm", "both"], description: "上午(上學/去程)=am, 下午(放學/回程)=pm, both if the row is for both or not stated" },
+        order: { type: "integer", description: "搭車順序 number as written; 0 if not shown" },
+        name: str,
+        className: { ...str, description: "班級 as written, else empty" },
+        address: { ...str, description: "住址/上下車地點 as written, else empty" },
+        eta: { ...str, description: "預計時間 HH:MM 24-hour, else empty" },
+        contacts: arr(obj({ name: str, relation: { ...str, description: "e.g. 媽媽, 爸爸, 阿嬤; empty if unknown" }, phone: str })),
+        noRide: arr(obj({ weekday: { type: "integer", description: "1=Mon … 5=Fri" }, session: { type: "string", enum: ["am", "pm"] } })),
+        note: { ...str, description: "other remarks for this child, else empty" },
+      })),
+    }),
+    task: (ctx) =>
+      "這是幼兒園的「娃娃車（幼童專用車）搭車名單」。請逐一列出每一位搭車的幼兒：車次、上午或下午、搭車順序、姓名、班級、住址（或上下車地點）、預計到達時間、緊急聯絡人（姓名、關係、電話；有幾位就列幾位）。" +
+      "如果名單分成上午（上學）和下午（放學）兩張表，同一位幼兒在兩張表各列一筆，session 分別填 am 和 pm；如果沒有區分上下午，session 填 both。" +
+      "備註裡如果寫到固定某天不搭車（例如「週三下午不搭」「每週五自行接送」），填到 noRide（週五自行接送＝週五 pm；沒寫上下午就上午、下午都填）。其他說明放 note。" +
+      (ctx.routes?.length ? `園所目前已有的車次：${ctx.routes.join("、")}。如果名單上的車次就是其中之一，請用一樣的寫法。` : "") +
+      (ctx.text ? `\n\n以下是檔案裡的文字內容（表格的每一列用 | 分隔）：\n${String(ctx.text).slice(0, 30000)}` : ""),
+  },
   lessonChat: {
     textOnly: true,
     effort: "medium",

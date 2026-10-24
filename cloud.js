@@ -200,6 +200,15 @@
     const handOff = /^[A-Za-z0-9]{24,64}$/.test(pair || "") && pair !== rawGet.call(LS, "bear_cloud_pair");
     const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify(handOff ? { idToken, pair } : { idToken }) });
     const body = await res.json();
+    if (res.status === 401 && window.liff && !sessionStorage.getItem("bear_login_retry")) {
+      // LINE's proof of login was too old: sign out of LINE here and log in again once.
+      try { sessionStorage.setItem("bear_login_retry", "1"); } catch {}
+      report("LINE 登入需要重新確認，正在重新連到 LINE…");
+      try { liff.logout(); } catch {}
+      liff.login({ redirectUri: location.origin + location.pathname + (handOff ? "?pair=" + pair : (isApp() && rawGet.call(LS, "bear_cloud_pair") ? "?pair=" + rawGet.call(LS, "bear_cloud_pair") : "")) });
+      return;
+    }
+    try { sessionStorage.removeItem("bear_login_retry"); } catch {}
     if (!res.ok) throw new Error(body.error || "登入失敗");
     if (body.paired) {
       report("LINE 登入完成！請回到手機主畫面的「小熊工作室」App，它會自動登入。");
@@ -213,6 +222,7 @@
     try { LS.removeItem("bear_cloud_pair"); } catch {}
     return finishLogin(body);
   }
+  function idTokenStale() { try { const d = liff.getDecodedIDToken(); return !d || !d.exp || d.exp * 1000 < Date.now() + 60e3; } catch { return true; } }
   function newNonce() { const a = new Uint8Array(24); crypto.getRandomValues(a); return Array.from(a, (b) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join(""); }
   let claiming = false;
   async function claimPairedLogin() {
@@ -239,6 +249,8 @@
       if (!CFG.liffId) { toast("LINE 登入還在設定中，設定好之後就能用了"); return; }
       report("步驟 1／3：正在連到 LINE…");
       await initLiff();
+      // A LINE login left over from earlier can hold an expired ID token: start a fresh login instead.
+      if (liff.isLoggedIn() && idTokenStale()) { try { liff.logout(); } catch {} }
       if (!liff.isLoggedIn()) {
         report("步驟 1／3：前往 LINE 登入頁…");
         let redirectUri = location.origin + location.pathname;

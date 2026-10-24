@@ -38,6 +38,7 @@ Deno.serve(async (req) => {
       body: new URLSearchParams({ id_token: idToken, client_id: channelId }),
     });
     const info = await verify.json();
+    if (!verify.ok || !info.sub) console.log("LINE verify failed", JSON.stringify(info));
     if (!verify.ok || !info.sub) return json({ error: "LINE 登入驗證失敗，請重新登入", detail: info }, 401);
 
     const email = `line-${String(info.sub).toLowerCase()}@users.littlebear-workroom.app`;

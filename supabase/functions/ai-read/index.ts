@@ -48,7 +48,7 @@ const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string }> = {
   calendar: {
     schema: obj({
       events: arr(obj({
-        date: { ...str, description: "YYYY-MM-DD" },
+        date: { ...str, description: "YYYY-MM-DD, zero-padded, e.g. 2026-09-07" },
         end: { ...str, description: "YYYY-MM-DD for multi-day items, else empty" },
         time: { ...str, description: "HH:MM or HH:MM–HH:MM, else empty" },
         title: str,
@@ -123,6 +123,8 @@ Deno.serve(async (req) => {
     const text = (response.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
     let data: unknown;
     try { data = JSON.parse(text); } catch { return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
+    const d: any = data;
+    console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || []).length, sample: JSON.stringify(d).slice(0, 300) }));
     return json({ ok: true, data, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e), fallback: true }, 500);

@@ -17,7 +17,17 @@ const obj = (props: Record<string, unknown>) => ({ type: "object", properties: p
 const arr = (items: unknown) => ({ type: "array", items });
 const slot = obj({ start: { ...str, description: "HH:MM 24-hour" }, end: { ...str, description: "HH:MM 24-hour, empty if not shown" }, name: str });
 
-const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string }> = {
+const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textOnly?: boolean; effort?: string }> = {
+  lesson: {
+    textOnly: true,
+    effort: "low",
+    schema: obj({ suggestions: arr(obj({ code: { ...str, description: "indicator code copied exactly from the list" }, reason: { ...str, description: "why it fits, under 25 Chinese characters" } })) }),
+    task: (ctx) => {
+      const l = ctx.lesson || {}, list = (ctx.candidates || []).slice(0, 200).map((c: string[]) => `${c[0]} ${c[1]}`).join("\n");
+      return `你是熟悉《幼兒園教保活動課程大綱》的幼教老師。請根據下面這份教案，從「可選的學習指標」中挑出 3～8 條最適合的，依適合程度排序。只能使用清單裡的代碼，代碼要完全照抄。理由用一句話說明這個活動的哪個部分對應到這條指標（25 字以內）。\n\n` +
+        `【教案】\n活動名稱：${l.title || ""}\n主題：${l.theme || ""}\n適用班級：${l.age || ""}\n學習目標：${l.goal || ""}\n材料與活動流程：${l.steps || ""}\n\n【可選的學習指標（${l.age || ""}）】\n${list}`;
+    },
+  },
   routine: {
     schema: obj({
       slots: arr(slot),
@@ -88,7 +98,7 @@ Deno.serve(async (req) => {
     const kind = KINDS[body.kind];
     if (!kind) return json({ error: "unknown kind" }, 400);
     const images: { media_type: string; data: string }[] = (body.images || []).slice(0, 4);
-    if (!images.length) return json({ error: "沒有收到圖片" }, 400);
+    if (!images.length && !kind.textOnly) return json({ error: "沒有收到圖片" }, 400);
     if (!Deno.env.get("ANTHROPIC_API_KEY")) return json({ error: "AI 讀圖還沒設定好", fallback: true }, 503);
 
     // daily cap per teacher
@@ -99,14 +109,14 @@ Deno.serve(async (req) => {
 
     const client = new Anthropic();
     const content: any[] = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } }));
-    content.push({ type: "text", text: kind.task(body.context || {}) + "\n只根據圖片上真的看得到的內容回答，看不清楚的字照你最有把握的讀法填寫，不要自己編造沒有的項目。" });
+    content.push({ type: "text", text: kind.task(body.context || {}) + (kind.textOnly ? "" : "\n只根據圖片上真的看得到的內容回答，看不清楚的字照你最有把握的讀法填寫，不要自己編造沒有的項目。") });
 
     let response: any;
     try {
       response = await client.beta.messages.create({
         model: "claude-opus-5-5",
         max_tokens: 16000,
-        output_config: { effort: "medium", format: { type: "json_schema", schema: kind.schema } },
+        output_config: { effort: kind.effort || "medium", format: { type: "json_schema", schema: kind.schema } },
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         messages: [{ role: "user", content }],
@@ -124,7 +134,7 @@ Deno.serve(async (req) => {
     let data: unknown;
     try { data = JSON.parse(text); } catch { return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
     const d: any = data;
-    console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || []).length, sample: JSON.stringify(d).slice(0, 300) }));
+    console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length, sample: JSON.stringify(d).slice(0, 300) }));
     return json({ ok: true, data, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e), fallback: true }, 500);

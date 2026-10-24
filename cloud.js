@@ -201,7 +201,15 @@
     const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify(handOff ? { idToken, pair } : { idToken }) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "登入失敗");
-    if (body.paired) { report("LINE 登入完成！請回到手機主畫面的「小熊工作室」App，它會自動登入。"); toast("登入完成，請回到主畫面的小熊工作室 App"); return; }
+    if (body.paired) {
+      report("LINE 登入完成！請回到手機主畫面的「小熊工作室」App，它會自動登入。");
+      history.replaceState(null, "", location.pathname);
+      const o = document.createElement("div");
+      o.style.cssText = "position:fixed;inset:0;z-index:999;background:#fbf6f0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center;color:#5d4b44";
+      o.innerHTML = `<img src="/icon-192.png" width="96" height="96" alt="" style="border-radius:22px;box-shadow:0 8px 24px #8264511f"><h2 style="margin:6px 0 0;font-size:21px">LINE 登入完成 ♡</h2><p style="margin:0;font-size:14px;line-height:1.8;color:#8d786d">現在可以關掉這個瀏覽器，<br>回到手機主畫面，打開<b>小熊工作室</b> App，<br>它會自動幫你登入。</p><p style="margin:8px 0 0;font-size:12px;color:#a39287">只有第一次需要這樣，之後打開 App 都會保持登入。</p>`;
+      document.body.appendChild(o);
+      return;
+    }
     try { LS.removeItem("bear_cloud_pair"); } catch {}
     return finishLogin(body);
   }
@@ -234,7 +242,7 @@
       if (!liff.isLoggedIn()) {
         report("步驟 1／3：前往 LINE 登入頁…");
         let redirectUri = location.origin + location.pathname;
-        if (isApp()) { const n = newNonce(); rawSet.call(LS, "bear_cloud_pair", n); redirectUri += "?pair=" + n; }
+        if (isApp()) { const n = newNonce(); rawSet.call(LS, "bear_cloud_pair", n); redirectUri += "?pair=" + n; report("登入完成後，如果停在 Safari，請回到這個 App，它會自動登入。"); }
         liff.login({ redirectUri }); return;
       }
       await exchange(liff.getIDToken());
@@ -386,6 +394,24 @@
     (say || (() => {}))("AI 讀完了，請檢查下面的內容");
     return body.data;
   }
+  // ---------- automatic updates: a newer version of the site is picked up when the app is opened ----------
+  const APP_VER = (document.querySelector('meta[name="bear-version"]') || {}).content || "";
+  let hiddenAt = 0;
+  const busy = () => { const a = document.activeElement; return (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || !!document.querySelector(".md-actions [data-act=confirm]:not(.hidden)"); };
+  async function checkUpdate(reason) {
+    try {
+      const v = (await (await fetch("/version.txt?t=" + Date.now(), { cache: "no-store" })).text()).trim();
+      if (!/^\d{6,}$/.test(v) || !APP_VER || v === APP_VER) return;
+      let tried = ""; try { tried = sessionStorage.getItem("bear_upd") || ""; } catch {}
+      if (tried === v) return; // already reloaded for this version; the server copy may still be catching up
+      if (reason === "manual" || busy()) { needsRefresh("小熊工作室有新版本"); return; }
+      try { sessionStorage.setItem("bear_upd", v); } catch {}
+      location.replace(location.pathname + "?v=" + v);
+    } catch {}
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else if (Date.now() - hiddenAt > 15000) checkUpdate("resume"); });
+  setInterval(() => { if (!document.hidden) checkUpdate("manual"); }, 10 * 60e3);
+
   // ---------- home-screen app and phone notifications ----------
   const isApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
   const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -525,8 +551,10 @@
       }
     }
     registerSW().then(renderAppCards);
+    checkUpdate("boot");
     const v0 = new URLSearchParams(location.search).get("view");
     if (v0 && window.switchView) { switchView(v0); history.replaceState(null, "", location.pathname); }
+    else if (/[?&]v=\d+/.test(location.search) && !/[?&](code|liffClientId|liff\.state|pair)=/.test(location.search)) history.replaceState(null, "", location.pathname);
     if (!user && rawGet.call(LS, "bear_cloud_pair")) {
       claimPairedLogin();
       const t = setInterval(() => { if (user || !rawGet.call(LS, "bear_cloud_pair")) return clearInterval(t); if (!document.hidden) claimPairedLogin(); }, 3000);

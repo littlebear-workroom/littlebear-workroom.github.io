@@ -8,6 +8,7 @@
     supabaseKey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7",
     liffId: "2012187193-uL27Ayag",
     oaBasicId: "@773tdrjx", // 熊班 official account
+    vapidKey: "BM2rjrxMX-qgEIz8rnOkN_gC1aywURPYw9tZ0Jdoo08sjg0sSwAQMCRnyKQlIXkxjMmsbxARBMVO02_IZG1sYHY", // phone notifications
   };
   // Data the whole class shares vs. data that belongs to one teacher.
   const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
@@ -180,6 +181,7 @@
     subscribe();
     if (ws) { const changed = await pull({ reloadIfChanged: false }); if (upload) for (const k of SHARED) if (readLocal(k) !== undefined) await push(k); if (changed) reloadApp(); }
     renderCloudUI();
+    renderAppCards();
   }
 
   // ---------- LINE sign-in ----------
@@ -193,10 +195,27 @@
   async function exchange(idToken) {
     if (!idToken) throw new Error("LINE 沒有給登入證明（ID token），請確認 LIFF 的 Scopes 有勾 openid");
     report("步驟 2／3：LINE 登入完成，正在建立你的帳號…");
-    const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify({ idToken }) });
+    // Started from the home-screen app but LINE brought us back to Safari: hand the login to the app.
+    const pair = new URLSearchParams(location.search).get("pair") || (new URLSearchParams(location.search).get("liff.state") || "").replace(/^.*pair=([A-Za-z0-9]+).*$/, "$1");
+    const handOff = /^[A-Za-z0-9]{24,64}$/.test(pair || "") && pair !== rawGet.call(LS, "bear_cloud_pair");
+    const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify(handOff ? { idToken, pair } : { idToken }) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "登入失敗");
+    if (body.paired) { report("LINE 登入完成！請回到手機主畫面的「小熊工作室」App，它會自動登入。"); toast("登入完成，請回到主畫面的小熊工作室 App"); return; }
+    try { LS.removeItem("bear_cloud_pair"); } catch {}
     return finishLogin(body);
+  }
+  function newNonce() { const a = new Uint8Array(24); crypto.getRandomValues(a); return Array.from(a, (b) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join(""); }
+  let claiming = false;
+  async function claimPairedLogin() {
+    const n = rawGet.call(LS, "bear_cloud_pair");
+    if (!n || user || claiming || !sb) return;
+    claiming = true;
+    try {
+      const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify({ claim: n }) });
+      const body = await res.json().catch(() => ({}));
+      if (body.token_hash) { LS.removeItem("bear_cloud_pair"); report("步驟 3／3：收到 LINE 登入，正在登入…"); await finishLogin(body); }
+    } catch (e) { console.warn(e); } finally { claiming = false; }
   }
   async function finishLogin({ token_hash }) {
     const { data, error } = await sb.auth.verifyOtp({ token_hash, type: "magiclink" });
@@ -212,7 +231,12 @@
       if (!CFG.liffId) { toast("LINE 登入還在設定中，設定好之後就能用了"); return; }
       report("步驟 1／3：正在連到 LINE…");
       await initLiff();
-      if (!liff.isLoggedIn()) { report("步驟 1／3：前往 LINE 登入頁…"); liff.login({ redirectUri: location.origin + location.pathname }); return; }
+      if (!liff.isLoggedIn()) {
+        report("步驟 1／3：前往 LINE 登入頁…");
+        let redirectUri = location.origin + location.pathname;
+        if (isApp()) { const n = newNonce(); rawSet.call(LS, "bear_cloud_pair", n); redirectUri += "?pair=" + n; }
+        liff.login({ redirectUri }); return;
+      }
       await exchange(liff.getIDToken());
     } catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); toast("登入失敗：" + (e.message || e)); }
   }
@@ -362,6 +386,80 @@
     (say || (() => {}))("AI 讀完了，請檢查下面的內容");
     return body.data;
   }
+  // ---------- home-screen app and phone notifications ----------
+  const isApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const inLine = () => /\bLine\//i.test(navigator.userAgent);
+  let installEvt = null, swReg = null;
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; renderAppCards(); });
+  async function registerSW() {
+    if (!("serviceWorker" in navigator)) return null;
+    try { swReg = await navigator.serviceWorker.register("/sw.js"); } catch (e) { console.warn(e); }
+    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.type === "open-view" && e.data.view && window.switchView) switchView(e.data.view); });
+    return swReg;
+  }
+  const b64u = (s) => { const p = "=".repeat((4 - (s.length % 4)) % 4), r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
+  async function pushState() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return isIOS() && !isApp() ? "needApp" : "unsupported";
+    if (Notification.permission === "denied") return "denied";
+    const reg = swReg || (await navigator.serviceWorker.getRegistration());
+    const sub = reg && (await reg.pushManager.getSubscription());
+    return sub ? "on" : "off";
+  }
+  async function enablePush(btn) {
+    if (!user) { toast("請先用 LINE 登入"); return; }
+    try {
+      btn && (btn.disabled = true);
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { toast("沒有允許通知。要開啟的話，請到手機「設定」→「通知」→「小熊工作室」打開"); return; }
+      const reg = swReg || (await registerSW()) || (await navigator.serviceWorker.ready);
+      const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(CFG.vapidKey) }));
+      const j = sub.toJSON();
+      const { error } = await sb.from("push_subs").upsert({ endpoint: j.endpoint, user_id: user.id, sub: j });
+      if (error) throw error;
+      const { data } = await sb.auth.getSession();
+      await fetch(CFG.supabaseUrl + "/functions/v1/web-push", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ mode: "test" }) });
+      toast("手機通知開好了 ♡");
+    } catch (e) { console.error(e); toast("開啟通知失敗：" + (e.message || e)); }
+    finally { btn && (btn.disabled = false); renderAppCards(); }
+  }
+  async function disablePush() {
+    try {
+      const reg = swReg || (await navigator.serviceWorker.getRegistration()), sub = reg && (await reg.pushManager.getSubscription());
+      if (sub) { if (sb && user) await sb.from("push_subs").delete().eq("endpoint", sub.endpoint); await sub.unsubscribe(); }
+      toast("這支手機不會再收到通知");
+    } catch (e) { toast("關閉失敗：" + (e.message || e)); }
+    renderAppCards();
+  }
+  async function renderAppCards() {
+    const st = await pushState().catch(() => "unsupported");
+    const steps = isIOS()
+      ? (inLine() ? `<ol class="app-steps"><li>點右上角「⋯」→ 選「用預設瀏覽器開啟」（Safari）</li><li>在 Safari 點下方的分享按鈕 <b>⬆︎</b></li><li>往下滑，點「加入主畫面」→「新增」</li></ol>`
+        : `<ol class="app-steps"><li>用 <b>Safari</b> 開這個網站（現在就是的話直接下一步）</li><li>點下方的分享按鈕 <b>⬆︎</b></li><li>往下滑，點「加入主畫面」→「新增」</li><li>之後從主畫面的小熊圖示打開，登入一次就會一直保持登入</li></ol>`)
+      : installEvt ? `<button type="button" class="primary" data-app="install">安裝到手機主畫面</button>`
+      : `<ol class="app-steps"><li>用 Chrome 開這個網站</li><li>點右上角「⋮」→「加到主畫面」或「安裝應用程式」</li></ol>`;
+    const install = isApp() ? `<p class="small-note app-ok">✓ 你正在用主畫面的 App，登入會一直保持。</p>` : `<p class="small-note" style="line-height:1.7;margin:8px 0 4px">加到手機主畫面後，打開就像 App 一樣，不用每次找網址，也可以收到手機通知。</p>${steps}`;
+    const push = !user ? `<p class="small-note" style="margin:10px 0 0">登入後就能開啟手機通知。</p>`
+      : st === "on" ? `<p class="small-note app-ok">✓ 這支手機已開啟通知：同班老師更新班表、名冊、作息表等資料時會通知你。</p><div class="rt-actions"><button type="button" class="outline-btn" data-app="test">傳一則測試通知</button><button type="button" class="outline-btn" data-app="off">關閉這支手機的通知</button></div>`
+      : st === "needApp" ? `<p class="small-note" style="margin:10px 0 0;line-height:1.7">iPhone 要先照上面的步驟加到主畫面，從主畫面打開後，才能開啟手機通知。</p>`
+      : st === "denied" ? `<p class="small-note" style="margin:10px 0 0;line-height:1.7">通知被關掉了。請到手機「設定」→「通知」→「小熊工作室」把「允許通知」打開，再回來這裡。</p>`
+      : st === "unsupported" ? `<p class="small-note" style="margin:10px 0 0">這個瀏覽器不支援手機通知，可以改用 LINE 通知（下方設定）。</p>`
+      : `<button type="button" class="primary" data-app="on" style="margin-top:10px">開啟手機通知</button><p class="small-note" style="margin:6px 0 0;line-height:1.6">同班老師更新班表、名冊、作息表等資料時，手機會跳出通知。</p>`;
+    for (const id of ["appCard", "appCardLogin"]) {
+      const el = document.getElementById(id); if (!el) continue;
+      if (id === "appCardLogin" && isApp() && st === "on") { el.hidden = true; continue; }
+      el.hidden = false;
+      el.innerHTML = `<div class="lesson-top"><div class="lesson-icon"><span class=illus-bear aria-hidden=true></span></div><div><h4>手機 App 與通知</h4><p>把小熊工作室放到手機主畫面，並開啟通知。</p></div></div>${install}${push}`;
+      el.querySelectorAll("[data-app]").forEach((b) => b.onclick = async () => {
+        const a = b.dataset.app;
+        if (a === "on") enablePush(b);
+        else if (a === "off") disablePush();
+        else if (a === "install" && installEvt) { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; renderAppCards(); }
+        else if (a === "test") { const { data } = await sb.auth.getSession(); const r = await fetch(CFG.supabaseUrl + "/functions/v1/web-push", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ mode: "test" }) }); const j = await r.json().catch(() => ({})); toast(r.ok ? "已傳出，看看手機通知 ♡" : "沒有傳出去：" + (j.error || "請稍後再試")); }
+      });
+    }
+  }
+
   window.bearAI = { read: aiRead, pdfPages, get ready() { return !!user; } };
 
   // ---------- backup (moving data from the old desktop file) ----------
@@ -387,7 +485,7 @@
   // ---------- boot ----------
   async function boot() {
     const css = document.createElement("style");
-    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
+    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.app-steps{margin:8px 0 4px;padding-left:20px;font-size:12px;line-height:1.9;color:#6e5d54}.app-ok{color:#728369!important;margin:10px 0 6px!important;line-height:1.7}#appCard .rt-actions,#appCardLogin .rt-actions{margin-top:8px}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
     document.head.appendChild(css);
     installGuestUI();
     window.startLineLogin = startLogin;
@@ -426,8 +524,16 @@
         catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); toast("登入失敗：" + (e.message || e)); }
       }
     }
+    registerSW().then(renderAppCards);
+    const v0 = new URLSearchParams(location.search).get("view");
+    if (v0 && window.switchView) { switchView(v0); history.replaceState(null, "", location.pathname); }
+    if (!user && rawGet.call(LS, "bear_cloud_pair")) {
+      claimPairedLogin();
+      const t = setInterval(() => { if (user || !rawGet.call(LS, "bear_cloud_pair")) return clearInterval(t); if (!document.hidden) claimPairedLogin(); }, 3000);
+      setTimeout(() => clearInterval(t), 15 * 60e3);
+    }
     window.addEventListener("online", flushDirty);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden && user) flushDirty().then(() => pull({ reloadIfChanged: false }).then((c) => c && needsRefresh("雲端有新的資料"))); });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && !user) claimPairedLogin(); if (!document.hidden && user) flushDirty().then(() => pull({ reloadIfChanged: false }).then((c) => c && needsRefresh("雲端有新的資料"))); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();

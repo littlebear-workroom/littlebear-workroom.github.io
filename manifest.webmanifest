@@ -1,0 +1,16 @@
+{
+  "name": "小熊工作室",
+  "short_name": "小熊工作室",
+  "description": "幼兒園老師的工作小幫手",
+  "lang": "zh-Hant",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbf6f0",
+  "theme_color": "#fbf6f0",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

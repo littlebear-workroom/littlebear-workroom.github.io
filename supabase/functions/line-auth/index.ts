@@ -12,11 +12,22 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
+const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "use POST" }, 405);
   try {
-    const { idToken } = await req.json();
+    const { idToken, pair, claim } = await req.json();
+    const okNonce = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9]{24,64}$/.test(v);
+    // The home-screen app asks whether its login (finished in Safari) is ready.
+    if (claim !== undefined) {
+      if (!okNonce(claim)) return json({ error: "bad code" }, 400);
+      const { data } = await admin.from("login_pairs").delete().eq("nonce", claim).gte("created_at", new Date(Date.now() - 15 * 60e3).toISOString()).select("token_hash").maybeSingle();
+      return json(data ? { token_hash: data.token_hash } : { pending: true });
+    }
     if (!idToken) return json({ error: "缺少 LINE 登入資訊" }, 400);
     const channelId = Deno.env.get("LINE_CHANNEL_ID");
     if (!channelId) return json({ error: "伺服器還沒設定 LINE Channel ID" }, 500);
@@ -29,9 +40,6 @@ Deno.serve(async (req) => {
     const info = await verify.json();
     if (!verify.ok || !info.sub) return json({ error: "LINE 登入驗證失敗，請重新登入", detail: info }, 401);
 
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
     const email = `line-${String(info.sub).toLowerCase()}@users.littlebear-workroom.app`;
 
     const { data: existing } = await admin.from("profiles").select("id").eq("line_user_id", info.sub).maybeSingle();
@@ -57,6 +65,12 @@ Deno.serve(async (req) => {
 
     const { data: link, error: linkErr } = await admin.auth.admin.generateLink({ type: "magiclink", email });
     if (linkErr) throw linkErr;
+    if (okNonce(pair)) {
+      // Login was finished outside the home-screen app: park it for the app to pick up.
+      await admin.from("login_pairs").delete().lt("created_at", new Date(Date.now() - 15 * 60e3).toISOString());
+      await admin.from("login_pairs").upsert({ nonce: pair, token_hash: link.properties.hashed_token, created_at: new Date().toISOString() });
+      return json({ paired: true, name: info.name ?? "" });
+    }
     return json({ token_hash: link.properties.hashed_token, email, name: info.name ?? "", picture: info.picture ?? "" });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e) }, 500);

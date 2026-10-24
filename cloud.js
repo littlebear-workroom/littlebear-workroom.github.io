@@ -187,6 +187,8 @@
     return true;
   }
   async function exchange(idToken) {
+    if (!idToken) throw new Error("LINE 沒有給登入證明（ID token），請確認 LIFF 的 Scopes 有勾 openid");
+    report("步驟 2／3：LINE 登入完成，正在建立你的帳號…");
     const res = await fetch(CFG.supabaseUrl + "/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey }, body: JSON.stringify({ idToken }) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "登入失敗");
@@ -196,16 +198,18 @@
     const { data, error } = await sb.auth.verifyOtp({ token_hash, type: "magiclink" });
     if (error) throw error;
     user = data.user;
+    report("步驟 3／3：登入成功");
+    try { sessionStorage.removeItem("bear_login_msg"); } catch {}
     await afterSignIn(true);
   }
   async function startLogin() {
     try {
       if (!CFG.liffId) { toast("LINE 登入還在設定中，設定好之後就能用了"); return; }
-      setStatus("正在連到 LINE…");
+      report("步驟 1／3：正在連到 LINE…");
       await initLiff();
-      if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.origin + location.pathname }); return; }
+      if (!liff.isLoggedIn()) { report("步驟 1／3：前往 LINE 登入頁…"); liff.login({ redirectUri: location.origin + location.pathname }); return; }
       await exchange(liff.getIDToken());
-    } catch (e) { console.error(e); toast("登入失敗：" + (e.message || e)); setStatus(""); }
+    } catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); toast("登入失敗：" + (e.message || e)); }
   }
   async function signOut() {
     await sb.auth.signOut(); user = null; ws = null; if (channel) sb.removeChannel(channel);
@@ -228,13 +232,15 @@
   // ---------- UI on the 登入 and 班級共享 pages ----------
   let lastList = null;
   function setStatus(t) { const el = document.getElementById("cloudStatus"); if (el) el.textContent = t; }
+  function report(t) { try { sessionStorage.setItem("bear_login_msg", t); } catch {} setStatus(t); console.log("[login]", t); }
   async function renderCloudUI(list) {
     if (list) lastList = list;
     const box = document.getElementById("cloudAccount"), team = document.getElementById("cloudTeam");
     if (!box || !team) return;
     const lb = document.querySelector(".line-login"); if (lb) lb.style.display = user ? "none" : "flex";
     if (!user) {
-      box.innerHTML = `<p class="small-note" style="line-height:1.7;margin:0">登入後，資料會存到雲端，換手機或電腦也看得到；同班老師加入同一個班級後會自動同步。</p>`;
+      box.innerHTML = `<p class="small-note" style="line-height:1.7;margin:0">登入後，資料會存到雲端，換手機或電腦也看得到；同班老師加入同一個班級後會自動同步。</p><p class="small-note" id="cloudStatus" style="margin:8px 0 0;color:#a86f70;line-height:1.6;overflow-wrap:anywhere"></p>`;
+      const last = sessionStorage.getItem("bear_login_msg"); if (last) setStatus(last);
       team.innerHTML = `<div class="empty">請先到「登入」頁用 LINE 登入，才能建立或加入班級。</div>`;
       return;
     }
@@ -326,8 +332,8 @@
       renderCloudUI();
       // coming back from the LINE login page
       if (CFG.liffId && (/[?&](code|liffClientId|liff\.state)=/.test(location.search) || /\bLine\//i.test(navigator.userAgent))) {
-        try { await initLiff(); if (liff.isLoggedIn()) await exchange(liff.getIDToken()); history.replaceState(null, "", location.pathname); }
-        catch (e) { console.error(e); toast("登入失敗：" + (e.message || e)); }
+        try { report("步驟 2／3：從 LINE 回來了，正在確認…"); await initLiff(); if (liff.isLoggedIn()) await exchange(liff.getIDToken()); else report("LINE 還沒有完成登入，請再按一次「使用 LINE 帳號登入」"); history.replaceState(null, "", location.pathname); }
+        catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); toast("登入失敗：" + (e.message || e)); }
       }
     }
     window.addEventListener("online", flushDirty);

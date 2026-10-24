@@ -76,6 +76,7 @@ Deno.serve(async (req) => {
 
     const { data: link, error: linkErr } = await admin.auth.admin.generateLink({ type: "magiclink", email });
     if (linkErr) throw linkErr;
+    console.log("line-auth sign-in", pair ? "hand-off to app" : "direct");
     if (okNonce(pair)) {
       // Login was finished outside the home-screen app: park it for the app to pick up.
       await admin.from("login_pairs").delete().lt("created_at", new Date(Date.now() - 15 * 60e3).toISOString());
@@ -85,6 +86,7 @@ Deno.serve(async (req) => {
     }
     return json({ token_hash: link.properties.hashed_token, email, name: info.name ?? "", picture: info.picture ?? "" });
   } catch (e) {
+    console.log("line-auth error", String((e as Error)?.stack ?? e));
     return json({ error: String((e as Error)?.message ?? e) }, 500);
   }
 });

@@ -15,8 +15,9 @@
   const PERSONAL = ["bear_tasks", "bear_trainings", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans"];
   // Read before LINE's SDK tidies up the address bar: set when the login was started from the home-screen app.
   const BOOT_PAIR = (() => {
-    const q = new URLSearchParams(location.search), st = decodeURIComponent(q.get("liff.state") || "");
-    let v = q.get("pair") || ((/pair=([A-Za-z0-9]{24,64})/.exec(st) || [])[1]) || "";
+    // LINE may wrap our address several times (liff.state, liffRedirectUri…), so unwrap and search all of it.
+    let t = location.search + location.hash, v = "";
+    for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } }
     try { if (v) sessionStorage.setItem("bear_boot_pair", v); else v = sessionStorage.getItem("bear_boot_pair") || ""; } catch {}
     return v;
   })();

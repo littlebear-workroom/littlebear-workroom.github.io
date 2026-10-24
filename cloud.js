@@ -7,7 +7,7 @@
     supabaseUrl: "https://cwsxlfifpydxmmjsiwzg.supabase.co",
     supabaseKey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7",
     liffId: "2012187193-uL27Ayag",
-    oaBasicId: "", // 熊班 official account, e.g. "@123abcde"
+    oaBasicId: "@773tdrjx", // 熊班 official account
   };
   // Data the whole class shares vs. data that belongs to one teacher.
   const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];

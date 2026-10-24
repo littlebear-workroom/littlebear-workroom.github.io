@@ -20,6 +20,7 @@ const LABELS: Record<string, [string, string]> = {
   bear_routine: ["班級作息表", "routine"],
   bear_student_records: ["學生名冊", "students"],
   bear_forms: ["回條小幫手", "forms"],
+  bear_afterschool: ["課後才藝", "afterschool"],
   bear_fund_records: ["班費紀錄", "funds"],
   bear_fund_types: ["班級資金分類", "funds"],
   bear_teacher_map: ["老師名單", "roster"],

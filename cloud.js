@@ -11,7 +11,7 @@
     vapidKey: "BM2rjrxMX-qgEIz8rnOkN_gC1aywURPYw9tZ0Jdoo08sjg0sSwAQMCRnyKQlIXkxjMmsbxARBMVO02_IZG1sYHY", // phone notifications
   };
   // Data the whole class shares vs. data that belongs to one teacher.
-  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
+  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_afterschool", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
   const PERSONAL = ["bear_tasks", "bear_trainings", "bear_training_cycle", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans"];
   // Read before LINE's SDK tidies up the address bar: set when the login was started from the home-screen app.
   const BOOT_PAIR = (() => {

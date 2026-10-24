@@ -562,20 +562,8 @@ const $=id=>document.getElementById(id);
 const todayISO=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
 const plusDays=(n)=>{let d=new Date();d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
 const uid=()=>Math.random().toString(36).slice(2,10);
-const seedTasks=[
-{ id:uid(),title:"確認明天的教案材料",category:"lesson",date:todayISO(),time:"16:00",priority:"high",desc:"檢查需要的紙張、顏料與教具",done:false},
-{ id:uid(),title:"整理本週活動照片",category:"admin",date:todayISO(),time:"16:30",priority:"normal",desc:"挑選照片並整理教學紀錄",done:false},
-{ id:uid(),title:"準備大肌肉活動器材",category:"school",date:todayISO(),time:"17:00",priority:"normal",desc:"活動前確認器材完整",done:false},
-{ id:uid(),title:"完成家長聯絡簿內容",category:"admin",date:plusDays(1),time:"15:30",priority:"high",desc:"整理今天的活動與提醒",done:false},
-{ id:uid(),title:"規劃下週自然主題活動",category:"lesson",date:plusDays(2),time:"16:00",priority:"normal",desc:"延續前一週課程內容",done:false},
-{ id:uid(),title:"整理教具收納區",category:"school",date:plusDays(3),time:"16:30",priority:"low",desc:"確認材料數量與收納位置",done:false}
-];
-const seedLessons=[
-{id:uid(),title:"風的魔術秀",category:"nature",age:"小班",goal:"透過吹氣觀察物體移動，感受風的力量。",steps:"材料：吸管、保麗龍球、紙盤。\n流程：觀察球的特性 → 嘗試吹動 → 比較遠近 → 分享發現。",date:todayISO()},
-{id:uid(),title:"毛毛蟲變蝴蝶",category:"insect",age:"小班",goal:"認識毛毛蟲、蛹到蝴蝶的變化過程。",steps:"用身體扮演毛毛蟲爬行、變蛹、破蛹，再展翅飛舞。",date:todayISO()},
-{id:uid(),title:"認識台江魚類與魚拓",category:"tai",age:"小班",goal:"觀察魚的外形，認識台江常見魚類。",steps:"觀察魚的外型 → 看電動魚游動 → 使用模型魚進行魚拓創作。",date:todayISO()},
-{id:uid(),title:"雲朵畫一畫",category:"nature",age:"小班",goal:"觀察雲朵形狀，嘗試用顏色表現想像。",steps:"觀察天空照片 → 說說雲朵像什麼 → 用棉花與顏料創作。",date:todayISO()}
-];
+const seedTasks=[];
+const seedLessons=[];
 let tasks=load("bear_tasks",seedTasks),lessons=load("bear_lessons",seedLessons),trainings=load("bear_trainings",[]),schedules=load("bear_schedules",[{id:uid(),date:todayISO(),start:"08:30",end:"17:30",role:"幼兒園主教",note:"依當日工作安排調整"}]),selectedDate=todayISO(),taskFilter="all",allFilter="open",lessonFilter="all",trainingFilter="all",currentView="home";
 function load(key,seed){try{const v=localStorage.getItem(key);return v?JSON.parse(v):seed}catch(e){return seed}}
 function persist(){localStorage.setItem("bear_tasks",JSON.stringify(tasks));localStorage.setItem("bear_lessons",JSON.stringify(lessons));localStorage.setItem("bear_trainings",JSON.stringify(trainings));localStorage.setItem("bear_schedules",JSON.stringify(schedules))}
@@ -1530,5 +1518,5 @@ window.addEventListener("error", function() {
  <div class="student-modal-panel"><div class="student-modal-head"><div><div class="eyebrow">MY LITTLE WORKROOM</div><h2 id="studentDetailTitle">寶貝資料</h2></div><button class="modal-close" onclick="closeStudentDetail()" aria-label="關閉">×</button></div><div id="studentDetailBody"></div></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="cloud.js?v=10"></script>
+<script src="cloud.js?v=11"></script>
 </body></html>

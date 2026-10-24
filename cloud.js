@@ -275,13 +275,13 @@
       return baseSwitch(v);
     };
     const css = document.createElement("style");
-    css.textContent = `body.guest #fab{display:none!important}body.guest #view-home>:not(.hello):not(#guestIntro){display:none!important}#guestIntro,#guestMenuNote{display:none}body.guest #guestIntro,body.guest #guestMenuNote{display:block}body.guest .menu-tile{position:relative}body.guest .menu-tile::after{content:"登入後使用";position:absolute;top:8px;right:10px;font-size:9px;color:#a86f70;background:#f7e8e6;border-radius:999px;padding:2px 7px}body.guest .menu-tile .tile-icon{filter:grayscale(.35)}#guestIntro .menu-grid{margin-top:14px}`;
+    css.textContent = `body.guest #fab{display:none!important}#guestIntro,#guestMenuNote{display:none}body.guest #guestIntro,body.guest #guestMenuNote{display:block}body.guest #view-home>:not(#guestIntro),body.guest #view-menu .menu-tile{pointer-events:none;user-select:none;-webkit-user-select:none}body.guest #view-home input,body.guest #view-home button:not(#guestIntro *){pointer-events:none}`;
     document.head.appendChild(css);
     const hello = document.querySelector("#view-home .hello"), grid = document.querySelector("#view-menu .menu-grid");
     if (hello && !document.getElementById("guestIntro")) {
       const intro = document.createElement("div");
-      intro.id = "guestIntro"; intro.className = "lesson-card"; intro.style.marginTop = "14px";
-      intro.innerHTML = `<h3 style="margin:0 0 6px;font-size:17px">歡迎來到小熊工作室</h3><p class="small-note" style="line-height:1.7;margin:0 0 12px">幼兒園老師的工作小幫手。用 LINE 登入後就能開始使用，資料會存到雲端，換手機也看得到，同班老師還能一起同步。</p><button type="button" class="primary" id="guestLogin" style="background:#06C755;color:#fff;display:flex;justify-content:center;align-items:center;gap:10px"><span class="line-mark">LINE</span>使用 LINE 帳號登入</button><div class="small-note" style="margin:16px 2px 0;font-weight:700;color:#8f706b">登入後可以使用的功能</div><div class="menu-grid">${grid ? grid.innerHTML : ""}</div>`;
+      intro.id = "guestIntro"; intro.className = "motor-warn"; intro.style.margin = "14px 0 0";
+      intro.innerHTML = `還沒登入，只能先看看有哪些功能。<button type="button" class="link-btn" id="guestLogin" style="font-size:12px">用 LINE 登入</button>`;
       hello.after(intro);
       intro.querySelector("#guestLogin").onclick = () => startLogin();
     }

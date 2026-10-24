@@ -6,7 +6,7 @@
   const CFG = {
     supabaseUrl: "https://cwsxlfifpydxmmjsiwzg.supabase.co",
     supabaseKey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7",
-    liffId: "", // filled in once the LINE LIFF app exists
+    liffId: "2012187193-uL27Ayag",
   };
   // Data the whole class shares vs. data that belongs to one teacher.
   const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
@@ -325,7 +325,7 @@
     else {
       renderCloudUI();
       // coming back from the LINE login page
-      if (CFG.liffId && /[?&](code|liffClientId|liff\.state)=/.test(location.search)) {
+      if (CFG.liffId && (/[?&](code|liffClientId|liff\.state)=/.test(location.search) || /\bLine\//i.test(navigator.userAgent))) {
         try { await initLiff(); if (liff.isLoggedIn()) await exchange(liff.getIDToken()); history.replaceState(null, "", location.pathname); }
         catch (e) { console.error(e); toast("登入失敗：" + (e.message || e)); }
       }

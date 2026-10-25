@@ -24,6 +24,7 @@ const LABELS: Record<string, [string, string]> = {
   bear_bus_routes: ["娃娃車車次", "bus"],
   bear_bus_riders: ["娃娃車名單", "bus"],
   bear_attendance: ["出缺勤點名", "attendance"],
+  bear_leaves: ["請假與代班交接", "leave"],
   bear_fund_records: ["班費紀錄", "funds"],
   bear_fund_types: ["班級資金分類", "funds"],
   bear_teacher_map: ["老師名單", "roster"],
@@ -120,6 +121,16 @@ Deno.serve(async (req) => {
         label = ["寶貝補給品", "supplies"]; logKey = key + "#supplies";
       }
     }
+    // a teacher just registered leave: always tell the class, with the dates
+    let custom: { title: string; body: string } | null = null;
+    if (key === "bear_leaves" && Array.isArray(body.new)) {
+      const oldIds = new Set((Array.isArray(body.old) ? body.old : []).map((x: any) => x?.id));
+      const fresh = body.new.filter((x: any) => x && x.id && !oldIds.has(x.id));
+      if (!fresh.length) return json({ ok: true, skipped: "leave edited" });
+      const l = fresh[fresh.length - 1], d = (iso: string) => `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}`;
+      custom = { title: "老師請假通知", body: `${l.by} 老師 ${l.from === l.to ? d(l.from) : d(l.from) + "～" + d(l.to)}（${l.period}）請假，代班交接單已經準備好了，點開看看` };
+      logKey = key + "#" + l.id;
+    }
     const { data: last } = await admin.from("push_log").select("sent_at").eq("workspace_id", ws).eq("key", logKey).maybeSingle();
     if (last && Date.now() - new Date(last.sent_at).getTime() < QUIET_MINUTES * 60e3) return json({ ok: true, skipped: "quiet" });
     await admin.from("push_log").upsert({ workspace_id: ws, key: logKey, sent_at: new Date().toISOString() });
@@ -130,7 +141,7 @@ Deno.serve(async (req) => {
     ]);
     const to = (members || []).map((m: any) => m.user_id).filter((id: string) => id !== by);
     const name = (who as any)?.display_name || "同班老師";
-    const sent = await sendTo(to, { title: `${w?.name || "班級"}有新資料`, body: `${name} 更新了「${label[0]}」，點開看看`, view: label[1], tag: `${ws}:${logKey}` });
+    const sent = await sendTo(to, custom ? { title: `${w?.name || "班級"}：${custom.title}`, body: custom.body, view: label[1], tag: `${ws}:${logKey}` } : { title: `${w?.name || "班級"}有新資料`, body: `${name} 更新了「${label[0]}」，點開看看`, view: label[1], tag: `${ws}:${logKey}` });
     return json({ ok: true, sent });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e) }, 500);

@@ -374,7 +374,7 @@
     const css = document.createElement("style");
     css.textContent = `body.guest #fab{display:none!important}#guestIntro,#guestMenuNote{display:none}body.guest #guestIntro,body.guest #guestMenuNote{display:block}body.guest #view-home>:not(#guestIntro),body.guest #view-menu .menu-tile{pointer-events:none;user-select:none;-webkit-user-select:none}body.guest #view-home input,body.guest #view-home button:not(#guestIntro *){pointer-events:none}`;
     document.head.appendChild(css);
-    const hello = document.querySelector("#view-home .hello"), grid = document.querySelector("#view-menu .menu-grid");
+    const hello = document.querySelector("#view-home .hello"), grid = document.querySelector("#menuGroups");
     if (hello && !document.getElementById("guestIntro")) {
       const intro = document.createElement("div");
       intro.id = "guestIntro"; intro.className = "motor-warn"; intro.style.margin = "14px 0 0";

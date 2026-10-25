@@ -42,6 +42,23 @@ const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textO
       (ctx.routes?.length ? `園所目前已有的車次：${ctx.routes.join("、")}。如果名單上的車次就是其中之一，請用一樣的寫法。` : "") +
       (ctx.text ? `\n\n以下是檔案裡的文字內容（表格的每一列用 | 分隔）：\n${String(ctx.text).slice(0, 30000)}` : ""),
   },
+  notice: {
+    textOnly: true,
+    effort: "low",
+    schema: obj({ versions: arr(obj({ style: str, text: { ...str, description: "the full notice, ready to paste into LINE" } })) }),
+    task: (ctx) =>
+      `你是臺灣幼兒園的老師，要寫一則給家長的通知，會直接貼到班級 LINE 群組。請用繁體中文，語氣${ctx.tone || "親切溫暖、有禮貌"}，清楚寫出日期時間、要準備或配合的事、截止時間（如果有）。可以適度用 1～3 個表情符號，不要太長（150～250 字），最後署名「${ctx.sign || "老師"}」。不要編造沒有提供的細節（地點、費用、時間沒給就不要寫）。\n` +
+      `請寫 2 個版本：第 1 個「完整版」、第 2 個「精簡版」（80 字內）。\n\n【活動資料】\n${String(ctx.info || "").slice(0, 3000)}\n\n【老師補充】\n${String(ctx.extra || "").slice(0, 1000)}`,
+  },
+  journal: {
+    textOnly: true,
+    effort: "medium",
+    schema: obj({ title: str, text: { ...str, description: "the full journal/report in Traditional Chinese with section headings" } }),
+    task: (ctx) =>
+      `你是臺灣幼兒園的教保老師，請依照下面這段期間的紀錄，寫一份${ctx.kind === "month" ? "「月報（月教學紀錄）」" : "「週誌（教學週誌）」"}草稿，用臺灣幼兒園常用的寫法、繁體中文。\n` +
+      `分段：一、本${ctx.kind === "month" ? "月" : "週"}課程與活動重點（依日期整理教案與大肌肉活動，寫出幼兒的學習經驗）　二、班級事務與行事曆（出席情形、重要活動）　三、幼兒學習與觀察（依學習指標寫整體表現，不要寫出個別孩子的名字）　四、下${ctx.kind === "month" ? "月" : "週"}計畫與家園聯繫。\n` +
+      `只根據提供的資料寫，沒有的不要編造；資料少的段落可以簡短。字數約 ${ctx.kind === "month" ? "600～900" : "350～550"} 字。\n\n【期間】${ctx.range || ""}\n【班級】${ctx.cls || ""}\n\n【紀錄】\n${String(ctx.data || "").slice(0, 12000)}\n\n【老師補充】\n${String(ctx.extra || "").slice(0, 1000)}`,
+  },
   lessonChat: {
     textOnly: true,
     effort: "medium",

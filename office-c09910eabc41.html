@@ -45,7 +45,7 @@ const SB = supabase.createClient("https://cwsxlfifpydxmmjsiwzg.supabase.co", "sb
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const FEATURES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", attendance: "出缺勤點名", logs: "週誌月報", team: "班級共享（多位老師）", ai: "AI 小幫手" };
-const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
+const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）", notice: "寫家長通知", journal: "寫週誌／月報" };
 const AI_COST_NT = { routine: 1, roster: 1, bus: 1, motor: 1, calendar: 3, lesson: 0.8, lessonChat: 2 }; // measured average cost per task (NT$)
 let D = null, U = null, FB = [], AN = [], tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
@@ -105,7 +105,7 @@ async function detailDialog(type, id) {
 }
 // ---------- pricing advisor ----------
 // measured average cost per call (NT$) used until there is enough real data
-const DEFAULT_CALL_NT = { routine: 0.9, roster: 1, bus: 1, motor: 1, calendar: 3.5, lesson: 0.8, lessonChat: 2.1 };
+const DEFAULT_CALL_NT = { notice: 0.6, journal: 3, routine: 0.9, roster: 1, bus: 1, motor: 1, calendar: 3.5, lesson: 0.8, lessonChat: 2.1 };
 const DEFAULT_MIX = { lessonChat: 0.4, lesson: 0.15, routine: 0.1, roster: 0.1, calendar: 0.1, bus: 0.05, motor: 0.1 }; // share of calls
 function advSettings() {
   const a = D.settings.pricing || {};

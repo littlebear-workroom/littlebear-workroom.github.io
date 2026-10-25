@@ -654,7 +654,7 @@
     }
     if (!catalog) { try { const { data } = await sb.rpc("plan_catalog"); catalog = data; } catch {} }
     const c = catalog || { plans: [], topups: [] }, costs = c.ai_costs || {};
-    const COST_NAMES = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
+    const COST_NAMES = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）", notice: "寫家長通知", journal: "寫週誌／月報" };
     view.innerHTML = `<h2 class="page-title">方案與續約 <span class=illus-star aria-hidden=true></span></h2><p class="page-sub">${access ? `目前方案：<b>${escH(access.plan || "")}</b>${access.ends_at ? `・${isRO() ? "已到期" : "到期日 " + fmtD(access.ends_at)}` : ""}` : ""}</p>
       ${c.plans.map((p) => `<article class="lesson-card plan-offer ${access && access.plan_id === p.id ? "current" : ""}"><div class="plan-offer-top"><div><h4>${escH(p.name)}</h4><p>${escH(p.description || "")}</p></div>${access && access.plan_id === p.id ? '<span class="plan-state active">目前方案</span>' : ""}</div>
         <div class="plan-price"><b>NT$${p.price_month}</b><small>／月</small>${p.price_year ? `<span>年繳 NT$${p.price_year.toLocaleString()}（省 NT$${(p.price_month * 12 - p.price_year).toLocaleString()}）</span>` : ""}</div>

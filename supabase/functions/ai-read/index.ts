@@ -54,6 +54,7 @@ const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textO
         teachGoals: { ...str, description: "教學目標, numbered lines 1. 2. 3." },
         behaviorGoals: { ...str, description: "行為目標: observable child behaviours, numbered lines, each starting with 幼兒能…" },
         indicators: arr({ ...str, description: "learning indicator code copied exactly from the list" }),
+        courseGoals: { ...str, description: "課程目標: one numbered line per chosen indicator, same order, each ending with the code in full-width brackets, e.g. 1. 透過觀察南瓜，認識南瓜的外形特徵（認-幼-1-2-1）" },
         steps: { ...str, description: "活動內容與流程: 引起動機 / 發展活動 / 綜合活動 sections with minutes, numbered steps, short teacher prompts in 「」" },
         materials: { ...str, description: "需準備材料, one item per line with quantity" },
       }),
@@ -63,7 +64,8 @@ const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textO
       const talk = (ctx.messages || []).slice(-14).map((m: any) => `${m.role === "ai" ? "AI" : "老師"}：${String(m.text || "").slice(0, 1500)}`).join("\n");
       return `你是臺灣幼兒園的資深教保老師，熟悉《幼兒園教保活動課程大綱》，正在幫同事一起寫教案。請依照老師的想法，完成或修改整份教案，用臺灣幼教常用的寫法、繁體中文。\n` +
         `規則：\n1. 老師說要改哪裡就改哪裡，其他欄位保留目前的內容（目前內容是空的就幫忙補上）。\n2. 學習指標選 3～6 條，只能用下面清單裡的代碼，代碼要完全照抄；要和活動內容真的對得上。\n` +
-        `3. 教學目標寫老師要引導的方向；行為目標寫看得到的幼兒行為（例如「幼兒能說出…」）。\n4. 活動流程分成「引起動機、發展活動、綜合活動」，寫出每段時間（分鐘）和簡短的引導語，總時間符合老師說的或適合該年齡。\n` +
+        `3. 教學目標寫老師要引導的方向；行為目標寫看得到的幼兒行為（例如「幼兒能說出…」）。\n` +
+        `3-1. 課程目標：每一條學習指標各寫一條，說明「透過這個活動的什麼內容，希望幼兒學到什麼」，要把指標落實到這堂課的具體東西。例如指標是「認-幼-1-2-1 觀察動植物的特徵」、活動在看南瓜，就寫「1. 透過觀察南瓜，認識南瓜的外形、顏色等特徵（認-幼-1-2-1）」。順序和 indicators 一致，每條最後用全形括號寫指標代碼。學習指標有改，課程目標就要跟著改。\n4. 活動流程分成「引起動機、發展活動、綜合活動」，寫出每段時間（分鐘）和簡短的引導語，總時間符合老師說的或適合該年齡。\n` +
         `5. 主題分類從這些裡面選一個最接近的：${(ctx.themes || []).join("、") || "（沒有）"}；都不適合就留空。\n6. 適用班級沒被老師要求更改就維持「${l.age || "小班"}」。\n7. reply 簡短說明你做了什麼；如果老師的想法太少、真的無法寫，就先在 reply 問一個問題，但仍盡量填出草稿。\n\n` +
         `【目前的教案內容】\n${JSON.stringify(l, null, 1)}\n\n【可選的學習指標（${l.age || ""}）】\n${list}\n\n【對話】\n${talk}`;
     },

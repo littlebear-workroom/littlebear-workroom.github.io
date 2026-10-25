@@ -2,6 +2,7 @@
 // The app (menu locks), the admin panel (plan checkboxes, AI point costs, pricing advice)
 // and the server (which data each feature may write) all read from here.
 // Adding a feature or an AI task = adding a line below.
+// Every front-end update also gets a note in BEAR_RELEASES (bottom): the admin panel turns new notes into announcements.
 window.BEAR_FEATURES = [
   // key        name                    menu views                 data it saves
   { key: "tasks",       name: "待辦清單",           views: ["tasks"],               data: ["bear_tasks"] },
@@ -40,4 +41,11 @@ window.BEAR_AI_KINDS = [
   { kind: "lessonChat", name: "AI 寫教案（每一輪）", points: 2, estNT: 2.1, share: 0.30 },
   { kind: "notice",     name: "寫家長通知",         points: 1, estNT: 0.6, share: 0.12 },
   { kind: "journal",    name: "寫週誌／月報",       points: 3, estNT: 3.0, share: 0.08 },
+];
+// What changed for teachers, newest last. Each note becomes a 「新功能上線」 announcement the first time
+// the admin panel opens after it ships, and the admin is asked whether to notify teachers.
+// id: unique and never reused. features: the BEAR_FEATURES keys it covers (optional).
+window.BEAR_RELEASES = [
+  { id: "2026-10-26-leave-multi", features: ["leaveplan"], title: "新功能上線",
+    body: "「請假攻略」升級了！\n・長按日期就能多選：按住不放再滑動，一次選好幾天；也可以一天一天點選\n・多選的日期會用同一種假別一起登記\n・需要代班交接單時，會列出每一天的交接事項，可以直接修改\n・還沒確定的日子可以先跳過，請假前一週會提醒你建立" },
 ];

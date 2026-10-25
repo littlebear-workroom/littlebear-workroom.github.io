@@ -17,6 +17,7 @@ header{display:flex;align-items:center;gap:12px;margin-bottom:14px}header img{wi
 .tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}
 .tag{display:inline-block;font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap}.t-active{background:var(--sageb);color:var(--sage)}.t-trial{background:var(--warnb);color:var(--warn)}.t-ro{background:var(--badb);color:var(--bad)}.t-none{background:#f1e4dc;color:#8d786d}.t-admin{background:var(--blueb);color:var(--blue)}
 .btn{background:var(--rose);color:#fff;border-radius:10px;padding:8px 12px;font-weight:700}.btn.o{background:var(--paper);color:var(--rose2);border:1px solid #e3c4c0}.btn.s{padding:5px 9px;font-size:12px}.btn:disabled{opacity:.5}
+.modal{position:fixed;inset:0;background:rgba(60,40,35,.38);display:grid;place-items:center;z-index:60;padding:16px}.modal-box{background:var(--paper);border-radius:18px;padding:18px;max-width:460px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 18px 50px rgba(60,40,35,.25)}.modal-box h3{margin:0 0 4px}.modal-acts{display:grid;gap:8px;margin-top:14px}.modal-acts .btn{display:grid;gap:2px;text-align:center;padding:10px 12px}.modal-acts small{font-size:11px;opacity:.85;font-weight:400}.btn.red{background:#c0474d}.ann-prev{background:#eef3f9;border-radius:12px;padding:10px 12px;margin-top:10px}.ann-prev p{white-space:pre-wrap;margin:4px 0 0;font-size:13px;line-height:1.65}
 .acts{display:flex;flex-wrap:wrap;gap:5px}
 input,select,textarea{border:1px solid #eadbd1;border-radius:10px;background:#fffdf9;padding:8px 10px;width:100%;min-width:0}textarea{min-height:80px;line-height:1.6}
 label.f{display:grid;gap:4px;font-size:12px;color:#8d786d}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:10px}
@@ -40,7 +41,7 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261026024043"></script>
+<script src="features.js?v=20261026025012"></script>
 <script>
 const FEATURES = Object.fromEntries((window.BEAR_FEATURES || []).map((f) => [f.key, f.name]));
 const AI_REG = Object.fromEntries((window.BEAR_AI_KINDS || []).map((k) => [k.kind, k]));
@@ -58,10 +59,50 @@ function subTag(s, via) {
   const cls = l <= 0 ? "t-ro" : s.status === "trial" ? "t-trial" : "t-active";
   return `<span class="tag ${cls}">${esc(name)}</span><div class="muted">${l <= 0 ? "已到期（唯讀）" : l > 3650 ? "長期有效" : `到 ${fd(s.ends_at)}・剩 ${l} 天`}${s.seats ? `・${s.seats} 位` : ""}</div><div class="muted">AI 已用 ${s.ai_used}${s.ai_bonus ? `・加購剩 ${s.ai_bonus}` : ""}</div>`;
 }
+const fdt = (iso) => { const d = new Date(iso); return `${fd(iso)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+// front-end updates listed in features.js (BEAR_RELEASES) become announcements the first time the admin panel opens
+async function syncReleases(data, newKeys) {
+  const rel = [...(window.BEAR_RELEASES || [])], done = new Set(data.settings.releases_done || []);
+  const covered = new Set(rel.flatMap((r) => r.features || [])), loose = (newKeys || []).filter((k) => !covered.has(k));
+  if (loose.length) { const names = loose.map((k) => FEATURES[k] || k); rel.push({ id: "auto-" + loose.join("-"), title: "新功能上線", body: `新增${names.map((n) => `「${n}」`).join("、")}功能，打開選單就能使用 ♡` }); }
+  const fresh = rel.filter((r) => !done.has(r.id)); if (!fresh.length) return [];
+  const ids = [];
+  for (const r of fresh) { const { data: id, error } = await SB.rpc("admin_save_announcement", { p: { title: r.title || "新功能上線", body: r.body || "", level: "info", release_id: r.id } }); if (error) return ids; if (id) ids.push(id); }
+  await SB.rpc("admin_save_setting", { p_key: "releases_done", p_value: [...done, ...fresh.map((r) => r.id)] });
+  return ids;
+}
+async function sendAnn(id, again) {
+  const { data: { session } } = await SB.auth.getSession();
+  const r = await fetch("https://cwsxlfifpydxmmjsiwzg.supabase.co/functions/v1/web-push", { method: "POST", headers: { "Content-Type": "application/json", apikey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7", Authorization: "Bearer " + (session?.access_token || "") }, body: JSON.stringify({ mode: "announce", id, again }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) return toast("發送失敗：" + (j.error || r.status));
+  toast(`已發送：手機 ${j.push || 0} 支${j.line ? `、LINE ${j.line} 位` : ""}`);
+}
+// ask whether to notify teachers about this announcement; 一般 = phone app, 重要 = phone app + LINE
+async function askNotify(id) {
+  const a = AN.find((x) => x.id === id); if (!a) return;
+  const { data: reach } = await SB.rpc("admin_announce_reach"); const pu = reach?.push ?? 0, li = reach?.line ?? 0;
+  return new Promise((done) => {
+    const m = document.createElement("div"); m.className = "modal";
+    const imp = a.level === "important";
+    m.innerHTML = `<div class="modal-box"><h3>要發送通知嗎？</h3><p class="muted" style="margin:0">${a.release_id ? "前台有新功能，已經自動建立公告並放上首頁。" : "公告已經放上首頁。"}${a.notified_at ? `<br>這則在 ${fdt(a.notified_at)} 發送過了。` : ""}</p><div class="ann-prev"><b>${imp ? "📢" : "✨"} ${esc(a.title)}</b><p>${esc(a.body || "")}</p></div>
+      <div class="modal-acts">${imp ? `<button class="btn red" data-nf="important">發送手機＋LINE 通知<small>重要｜${pu} 支手機・${li} 位老師的 LINE（會用掉 LINE 訊息額度）</small></button>` : `<button class="btn" data-nf="info">發送手機通知<small>一般｜${pu} 支開啟通知的手機</small></button><button class="btn red" data-nf="important">改成重要，發送手機＋LINE<small>${pu} 支手機・${li} 位老師的 LINE（會用掉 LINE 訊息額度）</small></button>`}<button class="btn o" data-nf="no">先不發送<small>之後可以在「公告」按「發送通知」</small></button></div></div>`;
+    document.body.appendChild(m);
+    const close = () => { m.remove(); done(); };
+    m.onclick = (e) => { if (e.target === m) close(); };
+    m.querySelectorAll("[data-nf]").forEach((b) => b.onclick = async () => {
+      const k = b.dataset.nf; if (k === "no") return close();
+      m.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      if (k === "important" && !imp) { const { error } = await SB.rpc("admin_save_announcement", { p: { id: a.id, title: a.title, body: a.body, level: "important", active: a.active, starts_at: a.starts_at, ends_at: a.ends_at } }); if (error) { toast("失敗：" + error.message); return close(); } }
+      await sendAnn(a.id, !!a.notified_at); close(); await load();
+    });
+  });
+}
 async function syncCatalog(data) {
   const feats = (window.BEAR_FEATURES || []).map((f) => f.key), keys = {}, kinds = {};
   (window.BEAR_FEATURES || []).forEach((f) => (f.data || []).forEach((d) => { keys[d] = f.key; }));
   (window.BEAR_AI_KINDS || []).forEach((k) => { kinds[k.kind] = k.points; });
+  window.__newKeys = feats.filter((f) => (data.plans || []).length && (data.plans || []).every((p) => !(f in (p.features || {}))));
   const plansMissing = (data.plans || []).some((p) => feats.some((f) => !(f in (p.features || {})))), costsMissing = Object.keys(kinds).some((k) => !((data.settings.ai_costs || {})[k] >= 0)), keysDiff = JSON.stringify(data.settings.feature_keys || {}) !== JSON.stringify(keys);
   if (!plansMissing && !costsMissing && !keysDiff) return null;
   const { data: r, error } = await SB.rpc("admin_sync_catalog", { p_features: feats, p_keys: keys, p_kinds: kinds });
@@ -73,6 +114,7 @@ async function load() {
   // AI tasks known from settings or usage but not in features.js still show up
   Object.keys({ ...(data?.settings?.ai_costs || {}), ...(us.data?.by_kind || {}) }).forEach((k) => { if (!AI_KINDS[k] && k !== "admin" && k !== "topup" && k !== "refund") AI_KINDS[k] = k; });
   if (!window.__synced && data) { window.__synced = true; const r = await syncCatalog(data); if (r && (r.features_added || r.ai_kinds_added)) { toast(`已自動加入 ${r.features_added} 個新功能、${r.ai_kinds_added} 種新的 AI 工作`); return load(); } }
+  if (!window.__relSynced && data && !error) { window.__relSynced = true; const ids = await syncReleases(data, window.__newKeys); if (ids.length) { await load(); for (const id of ids) await askNotify(id); return; } }
   if (error) { $("gate").hidden = false; $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
   D = data; U = us.data || { by_user: {}, by_ws: {}, paid_user: {}, paid_ws: {}, total: {}, by_kind: {}, usd_twd: 32 }; render();
 }
@@ -178,7 +220,7 @@ function fbHTML() {
   return `<p class="muted" style="margin:0 0 8px">老師送出意見時，你的 LINE 會收到通知。回覆後老師的 LINE 也會收到。</p>${FB.length ? FB.map((f) => `<div class="card" style="${f.status === "open" ? "border:2px solid #efc28a" : ""}"><div class="acts" style="justify-content:space-between;align-items:center"><div><b>${esc(f.name || "老師")}</b> <span class="tag t-none">${esc(FB_CAT[f.category] || f.category)}</span> <span class="tag ${f.status === "open" ? "t-trial" : "t-active"}">${f.status === "open" ? "待處理" : f.status === "replied" ? "已回覆" : "已結案"}</span></div><span class="muted">${new Date(f.created_at).toLocaleString("zh-TW")}</span></div><p style="white-space:pre-wrap;line-height:1.7;margin:8px 0">${esc(f.message)}</p>${f.reply ? `<div class="muted" style="background:var(--blueb);border-radius:10px;padding:8px 10px;white-space:pre-wrap;color:var(--ink)"><b>你的回覆：</b>${esc(f.reply)}</div>` : ""}${f.status !== "closed" ? `<textarea data-fbr="${f.id}" placeholder="輸入回覆（會用 LINE 傳給老師）" style="margin-top:8px;min-height:60px"></textarea><div class="acts" style="margin-top:6px"><button class="btn s" data-fbsend="${f.id}">送出回覆</button><button class="btn o s" data-fbclose="${f.id}">結案</button></div>` : ""}</div>`).join("") : '<div class="card empty">還沒有意見回饋</div>'}`;
 }
 function annHTML() {
-  const row = (a) => `<div class="card" data-an="${a.id || ""}"><div class="row"><label class="f">標題<input data-af="title" value="${esc(a.title || "")}" placeholder="例如：新功能上線！"></label><label class="f">類型<select data-af="level"><option value="info" ${a.level !== "important" ? "selected" : ""}>一般</option><option value="important" ${a.level === "important" ? "selected" : ""}>重要（紅色）</option></select></label><label class="f">開始顯示<input data-af="starts_at" type="date" value="${a.starts_at ? new Date(a.starts_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)}"></label><label class="f">結束顯示（空白＝一直顯示）<input data-af="ends_at" type="date" value="${a.ends_at ? new Date(a.ends_at).toISOString().slice(0, 10) : ""}"></label></div><label class="f">內容<textarea data-af="body" placeholder="例如：課後才藝名單上線了，到選單就能使用…">${esc(a.body || "")}</textarea></label><div class="acts" style="margin-top:8px;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" data-af="active" ${a.active !== false ? "checked" : ""} style="width:auto"> 顯示中</label><button class="btn s" data-ansave="1">保存</button>${a.id ? `<button class="btn o s" data-andel="${a.id}">刪除</button>` : ""}</div></div>`;
+  const row = (a) => `<div class="card" data-an="${a.id || ""}"><div class="row"><label class="f">標題<input data-af="title" value="${esc(a.title || "")}" placeholder="例如：新功能上線！"></label><label class="f">類型<select data-af="level"><option value="info" ${a.level !== "important" ? "selected" : ""}>一般</option><option value="important" ${a.level === "important" ? "selected" : ""}>重要（紅色）</option></select></label><label class="f">開始顯示<input data-af="starts_at" type="date" value="${a.starts_at ? new Date(a.starts_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)}"></label><label class="f">結束顯示（空白＝一直顯示）<input data-af="ends_at" type="date" value="${a.ends_at ? new Date(a.ends_at).toISOString().slice(0, 10) : ""}"></label></div><label class="f">內容<textarea data-af="body" placeholder="例如：課後才藝名單上線了，到選單就能使用…">${esc(a.body || "")}</textarea></label><div class="acts" style="margin-top:8px;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" data-af="active" ${a.active !== false ? "checked" : ""} style="width:auto"> 顯示中</label><button class="btn s" data-ansave="1">保存</button>${a.id ? `<button class="btn o s" data-annotify="${a.id}">${a.notified_at ? "再發送一次通知" : "發送通知"}</button><button class="btn o s" data-andel="${a.id}">刪除</button>` : ""}</div>${a.id ? `<div class="muted" style="margin-top:6px">${a.notified_at ? `已於 ${fdt(a.notified_at)} 發送通知（手機 ${a.notified_push || 0} 支${a.level === "important" ? `、LINE ${a.notified_line || 0} 位` : ""}）` : "還沒發送通知"}${a.release_id ? "・前台更新時自動建立" : ""}</div>` : ""}</div>`;
   return `<p class="muted" style="margin:0 0 8px">公告會出現在所有老師的首頁上方，老師按「知道了」後就不會再看到同一則。</p>${row({})}${AN.map(row).join("")}`;
 }
 async function applySetting(key, value, msg) { const { error } = await SB.rpc("admin_save_setting", { p_key: key, p_value: value }); if (error) return toast("失敗：" + error.message); toast(msg); load(); }
@@ -238,7 +280,8 @@ function bind() {
   document.querySelectorAll("[data-applycost]").forEach((b) => b.onclick = () => { const [k, v] = b.dataset.applycost.split("|"); if (!confirm(`把「${AI_KINDS[k]}」改成每次扣 ${v} 點？`)) return; applySetting("ai_costs", { ...(D.settings.ai_costs || {}), [k]: +v }, "已套用"); });
   document.querySelectorAll("[data-applytop]").forEach((b) => b.onclick = () => { const [i, v] = b.dataset.applytop.split("|"), t = [...(D.settings.topups || [])]; if (!confirm(`把「${t[+i].name}」售價改成 NT$${v}？`)) return; t[+i] = { ...t[+i], price: +v }; applySetting("topups", t, "已套用"); });
   document.querySelectorAll("[data-fbsend],[data-fbclose]").forEach((b) => b.onclick = async () => { const id = +(b.dataset.fbsend || b.dataset.fbclose), close = !!b.dataset.fbclose, reply = document.querySelector(`[data-fbr="${id}"]`)?.value.trim() || ""; if (!close && !reply) return toast("請輸入回覆"); const { error } = await SB.rpc("admin_reply_feedback", { p_id: id, p_reply: reply, p_close: close }); if (error) return toast("失敗：" + error.message); toast(reply ? "已回覆，老師會收到 LINE" : "已結案"); load(); });
-  document.querySelectorAll("[data-ansave]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-an]"), g = (k) => box.querySelector(`[data-af="${k}"]`); const p = { title: g("title").value.trim(), body: g("body").value.trim(), level: g("level").value, active: g("active").checked, starts_at: g("starts_at").value ? new Date(g("starts_at").value + "T00:00:00+08:00").toISOString() : null, ends_at: g("ends_at").value ? new Date(g("ends_at").value + "T23:59:59+08:00").toISOString() : null }; if (box.dataset.an) p.id = +box.dataset.an; if (!p.title) return toast("請輸入標題"); const { error } = await SB.rpc("admin_save_announcement", { p }); if (error) return toast("失敗：" + error.message); toast("公告已保存"); load(); });
+  document.querySelectorAll("[data-ansave]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-an]"), g = (k) => box.querySelector(`[data-af="${k}"]`); const p = { title: g("title").value.trim(), body: g("body").value.trim(), level: g("level").value, active: g("active").checked, starts_at: g("starts_at").value ? new Date(g("starts_at").value + "T00:00:00+08:00").toISOString() : null, ends_at: g("ends_at").value ? new Date(g("ends_at").value + "T23:59:59+08:00").toISOString() : null }; if (box.dataset.an) p.id = +box.dataset.an; if (!p.title) return toast("請輸入標題"); const { data: aid, error } = await SB.rpc("admin_save_announcement", { p }); if (error) return toast("失敗：" + error.message); toast("公告已保存"); await load(); if (!p.id && aid) askNotify(aid); });
+  document.querySelectorAll("[data-annotify]").forEach((b) => b.onclick = () => askNotify(+b.dataset.annotify));
   document.querySelectorAll("[data-andel]").forEach((b) => b.onclick = async () => { if (!confirm("確定刪除這則公告？")) return; const { error } = await SB.rpc("admin_delete_announcement", { p_id: +b.dataset.andel }); if (error) return toast(error.message); toast("已刪除"); load(); });
   document.querySelectorAll("[data-t2]").forEach((b) => b.onclick = () => { tab = b.dataset.t2; render(); });
   const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }

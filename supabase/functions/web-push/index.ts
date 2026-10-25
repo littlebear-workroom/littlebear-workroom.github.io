@@ -97,6 +97,32 @@ async function feedbackNotice(id: number, mode: string) {
   return { ok: true };
 }
 
+// an admin sends an announcement to every teacher: phone notification, plus LINE when it is important
+async function announce(id: number, userId: string, again: boolean) {
+  const { data: isAdmin } = await admin.from("admins").select("user_id").eq("user_id", userId).maybeSingle();
+  if (!isAdmin) return { status: 403, body: { error: "forbidden" } };
+  const { data: a } = await admin.from("announcements").select("*").eq("id", id).maybeSingle();
+  if (!a) return { status: 404, body: { error: "找不到公告" } };
+  if (a.notified_at && !again) return { status: 200, body: { ok: true, already: a.notified_at } };
+  const { data: subs } = await admin.from("push_subs").select("user_id");
+  const ids = [...new Set((subs || []).map((s: any) => s.user_id))] as string[];
+  const pushN = await sendTo(ids, { title: `${a.level === "important" ? "📢" : "✨"} ${a.title}`, body: String(a.body || "").replace(/\s+/g, " ").slice(0, 110), view: "home", tag: "ann-" + id });
+  let lineN = 0;
+  if (a.level === "important") {
+    const token = Deno.env.get("LINE_MESSAGING_TOKEN");
+    const { data: people } = await admin.from("profiles").select("line_user_id").not("line_user_id", "is", null);
+    const to = (people || []).map((p: any) => p.line_user_id);
+    const text = `📢 小熊工作室公告\n${a.title}\n\n${a.body || ""}`.slice(0, 4900);
+    for (let i = 0; token && i < to.length; i += 500) {
+      const chunk = to.slice(i, i + 500);
+      const r = await fetch("https://api.line.me/v2/bot/message/multicast", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ to: chunk, messages: [{ type: "text", text }] }) });
+      if (r.ok) lineN += chunk.length; else console.log("line multicast", r.status, await r.text());
+    }
+  }
+  await admin.from("announcements").update({ notified_at: new Date().toISOString(), notified_push: pushN, notified_line: lineN }).eq("id", id);
+  return { status: 200, body: { ok: true, push: pushN, line: lineN } };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -107,6 +133,13 @@ Deno.serve(async (req) => {
       if (!u?.user) return json({ error: "請先登入" }, 401);
       const n = await sendTo([u.user.id], { title: "小熊工作室", body: "手機通知開好了！班級有新資料時會通知你 ♡", view: "home" });
       return n ? json({ ok: true, sent: n }) : json({ error: "這支手機還沒開啟通知" }, 400);
+    }
+    if (body.mode === "announce") {
+      const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      const { data: u } = await admin.auth.getUser(jwt);
+      if (!u?.user) return json({ error: "請先登入" }, 401);
+      const r = await announce(Number(body.id), u.user.id, !!body.again);
+      return json(r.body, r.status);
     }
     if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
     if (body.mode === "pay_notice" || body.mode === "pay_result") return json(await paymentNotice(Number(body.payment), body.mode));

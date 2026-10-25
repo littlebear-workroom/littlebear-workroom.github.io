@@ -1,0 +1,17 @@
+{
+  "id": "/office-c09910eabc41.html",
+  "name": "小熊後台",
+  "short_name": "小熊後台",
+  "description": "小熊工作室管理後台",
+  "lang": "zh-Hant",
+  "start_url": "/office-c09910eabc41.html?source=app",
+  "scope": "/office-c09910eabc41.html",
+  "display": "standalone",
+  "background_color": "#fbf6f0",
+  "theme_color": "#fbf6f0",
+  "icons": [
+    { "src": "/admin-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

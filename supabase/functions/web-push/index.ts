@@ -35,11 +35,16 @@ const LABELS: Record<string, [string, string]> = {
   bear_lesson_themes: ["教案主題", "lessons"],
 };
 
-async function sendTo(userIds: string[], payload: Record<string, unknown>) {
+const ADMIN_URL = "/office-c09910eabc41.html";
+// app "teacher" = the 小熊工作室 home-screen app; "admin" = the 小熊後台 app (falls back to the teacher app until the admin app has notifications on)
+async function sendTo(userIds: string[], payload: Record<string, unknown>, app: "teacher" | "admin" = "teacher") {
   if (!userIds.length) return 0;
-  const { data: subs } = await admin.from("push_subs").select("endpoint, sub").in("user_id", userIds);
+  const { data: all } = await admin.from("push_subs").select("endpoint, sub, user_id, apps").in("user_id", userIds);
+  const has = (s: any, a: string) => (s.apps || ["teacher"]).includes(a);
+  let subs = (all || []).filter((s: any) => has(s, app));
+  if (app === "admin") { const covered = new Set(subs.map((s: any) => s.user_id)); subs = subs.concat((all || []).filter((s: any) => !covered.has(s.user_id))); payload = { ...payload, url: ADMIN_URL }; }
   let sent = 0;
-  await Promise.all((subs || []).map(async (s: any) => {
+  await Promise.all(subs.map(async (s: any) => {
     try { await webpush.sendNotification(s.sub, JSON.stringify(payload), { TTL: 86400 }); sent++; }
     catch (e: any) { if (e?.statusCode === 404 || e?.statusCode === 410) await admin.from("push_subs").delete().eq("endpoint", s.endpoint); else console.log("push error", e?.statusCode, e?.body || e?.message); }
   }));
@@ -67,7 +72,7 @@ async function paymentNotice(id: number, mode: string) {
     const { data: profs } = ids.length ? await admin.from("profiles").select("line_user_id").in("id", ids) : { data: [] };
     const text = `💰 新的付款通知\n老師：${payer?.display_name || ""}${ws?.name ? `\n班級：${ws.name}` : ""}\n內容：${what}\n金額：NT$${p.amount}\n轉出銀行代碼：${p.from_bank}\n帳號末五碼：${p.from_last5}\n轉帳日期：${p.transfer_date || ""}${p.note ? `\n備註：${p.note}` : ""}\n\n請到後台「付款紀錄」確認收款。`;
     for (const pr of profs || []) if (pr.line_user_id) await linePush(pr.line_user_id, text);
-    await sendTo(ids, { title: "新的付款通知", body: `${payer?.display_name || "老師"}・NT$${p.amount}・末五碼 ${p.from_last5}`, view: "home", tag: "pay-" + id });
+    await sendTo(ids, { title: "新的付款通知", body: `${payer?.display_name || "老師"}・NT$${p.amount}・末五碼 ${p.from_last5}`, view: "home", tag: "pay-" + id }, "admin");
   } else {
     const ok = p.status === "paid";
     const text = ok ? `🎉 小熊工作室已確認收款，${what}已經開通了！\n重新打開小熊工作室就能使用，謝謝你 ♡` : `小熊工作室付款通知被退回：${p.note || "款項核對不符"}\n如果有疑問，請直接聯絡我們。`;
@@ -88,7 +93,7 @@ async function feedbackNotice(id: number, mode: string) {
     const { data: profs } = ids.length ? await admin.from("profiles").select("line_user_id").in("id", ids) : { data: [] };
     const text = `📮 新的意見回饋（${FB_CAT[f.category] || f.category}）\n老師：${who?.display_name || ""}\n\n${String(f.message).slice(0, 800)}\n\n到後台「意見回饋」回覆。`;
     for (const pr of profs || []) if (pr.line_user_id) await linePush(pr.line_user_id, text);
-    await sendTo(ids, { title: "新的意見回饋", body: `${who?.display_name || "老師"}：${String(f.message).slice(0, 60)}`, view: "home", tag: "fb-" + id });
+    await sendTo(ids, { title: "新的意見回饋", body: `${who?.display_name || "老師"}：${String(f.message).slice(0, 60)}`, view: "home", tag: "fb-" + id }, "admin");
   } else {
     const text = `💌 小熊工作室回覆了你的意見：\n\n「${String(f.message).slice(0, 120)}」\n\n回覆：${f.reply}`;
     if (who?.line_user_id) await linePush(who.line_user_id, text);

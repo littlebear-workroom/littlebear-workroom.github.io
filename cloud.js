@@ -529,7 +529,10 @@
     if (Notification.permission === "denied") return "denied";
     const reg = swReg || (await navigator.serviceWorker.getRegistration());
     const sub = reg && (await reg.pushManager.getSubscription());
-    return sub ? "on" : "off";
+    if (!sub) return "off";
+    // on phones where both apps share one subscription, it may belong to the admin app only
+    if (sb && user) { try { const { data } = await sb.from("push_subs").select("apps").eq("endpoint", sub.endpoint).maybeSingle(); if (data && !(data.apps || ["teacher"]).includes("teacher")) return "off"; } catch {} }
+    return "on";
   }
   async function enablePush(btn) {
     if (!user) { toast("請先用 LINE 登入"); return; }
@@ -539,8 +542,7 @@
       if (perm !== "granted") { toast("沒有允許通知。要開啟的話，請到手機「設定」→「通知」→「小熊工作室」打開"); return; }
       const reg = swReg || (await registerSW()) || (await navigator.serviceWorker.ready);
       const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(CFG.vapidKey) }));
-      const j = sub.toJSON();
-      const { error } = await sb.from("push_subs").upsert({ endpoint: j.endpoint, user_id: user.id, sub: j });
+      const { error } = await sb.rpc("push_sub_save", { p_sub: sub.toJSON(), p_app: "teacher" });
       if (error) throw error;
       const { data } = await sb.auth.getSession();
       await fetch(CFG.supabaseUrl + "/functions/v1/web-push", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ mode: "test" }) });
@@ -551,7 +553,7 @@
   async function disablePush() {
     try {
       const reg = swReg || (await navigator.serviceWorker.getRegistration()), sub = reg && (await reg.pushManager.getSubscription());
-      if (sub) { if (sb && user) await sb.from("push_subs").delete().eq("endpoint", sub.endpoint); await sub.unsubscribe(); }
+      if (sub) { let left = 0; if (sb && user) ({ data: left } = await sb.rpc("push_sub_remove", { p_endpoint: sub.endpoint, p_app: "teacher" })); if (!left) await sub.unsubscribe(); }
       toast("這支手機不會再收到通知");
     } catch (e) { toast("關閉失敗：" + (e.message || e)); }
     renderAppCards();

@@ -4,7 +4,11 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>小熊工作室</title>
-<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="icon" type="image/png" href="/admin-icon-192.png">
+<link rel="manifest" href="/office-c09910eabc41.webmanifest">
+<link rel="apple-touch-icon" href="/admin-apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="小熊後台"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="theme-color" content="#fbf6f0">
 <style>
 :root{--bg:#fbf6f0;--paper:#fffdf9;--ink:#554943;--muted:#9a8980;--line:#eee3da;--rose:#bd8582;--rose2:#a66f72;--sage:#728369;--sageb:#edf2e9;--warn:#a2660f;--warnb:#fbe9cc;--bad:#b23b40;--badb:#fde2e1;--blue:#4f6f97;--blueb:#eef3f9}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif;font-size:14px}
@@ -41,8 +45,10 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261026025012"></script>
+<script src="features.js?v=20261026025748"></script>
 <script>
+// Read before LINE's SDK tidies the address bar: set when the login was started from the home-screen app.
+const BOOT_PAIR = (() => { let t = location.search + location.hash, v = ""; for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } } try { if (v) sessionStorage.setItem("adm_boot_pair", v); else v = sessionStorage.getItem("adm_boot_pair") || ""; } catch {} return v; })();
 const FEATURES = Object.fromEntries((window.BEAR_FEATURES || []).map((f) => [f.key, f.name]));
 const AI_REG = Object.fromEntries((window.BEAR_AI_KINDS || []).map((k) => [k.kind, k]));
 let AI_KINDS = Object.fromEntries(Object.values(AI_REG).map((k) => [k.kind, k.name]));
@@ -124,7 +130,7 @@ function render() {
   $("tabs").innerHTML = T.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
   $("tabs").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { tab = b.dataset.t; q = ""; render(); });
   const m = $("main");
-  if (tab === "home") m.innerHTML = homeHTML();
+  if (tab === "home") { m.innerHTML = `<div id="appCard"></div>` + homeHTML(); renderAppCard(); }
   if (tab === "users") m.innerHTML = usersHTML();
   if (tab === "usage") m.innerHTML = usageHTML();
   if (tab === "advice") m.innerHTML = adviceHTML();
@@ -357,35 +363,105 @@ async function liffReady() {
   await liff.init({ liffId: LIFF_ID });
 }
 function tokenStale() { try { const d = liff.getDecodedIDToken(); return !d || !d.exp || d.exp * 1000 < Date.now() + 60e3; } catch { return true; } }
+const SB_FN = "https://cwsxlfifpydxmmjsiwzg.supabase.co/functions/v1/", SB_PK = "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7";
+const isApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const lineAuth = (body) => fetch(SB_FN + "line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: SB_PK }, body: JSON.stringify(body) }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
+// Home-screen app: LINE login often finishes in Safari, so the app waits for a hand-off code (same as the teacher app).
+const PAIR_MS = 15 * 60e3;
+const pairList = () => { try { return (JSON.parse(localStorage.getItem("adm_pairs") || "[]") || []).filter((p) => p && p.n && Date.now() - p.t < PAIR_MS); } catch { return []; } };
+const myPairs = () => pairList().map((p) => p.n);
+function currentPair() { const l = pairList(), last = l[l.length - 1]; if (last && Date.now() - last.t < 10 * 60e3) return last.n; const a = new Uint8Array(24); crypto.getRandomValues(a); const n = Array.from(a, (b) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join(""); l.push({ n, t: Date.now() }); localStorage.setItem("adm_pairs", JSON.stringify(l.slice(-6))); return n; }
+const clearPairs = () => { try { localStorage.removeItem("adm_pairs"); } catch {} };
+let signedIn = false, claiming = false, pairTimer = null;
+async function finishLogin(token_hash) { const { error } = await SB.auth.verifyOtp({ token_hash, type: "magiclink" }); if (error) throw error; clearPairs(); signedIn = true; history.replaceState(null, "", location.pathname); await enter(); }
+async function claimPaired() { const n = myPairs(); if (!n.length || signedIn || claiming) return; claiming = true; try { const r = await lineAuth({ claim: n }); if (r.body.token_hash) { $("gate").innerHTML = "收到 LINE 登入，正在登入…"; await finishLogin(r.body.token_hash); } } catch (e) { console.warn(e); } finally { claiming = false; } }
+function watchPairs() { claimPaired(); if (pairTimer) return; const t0 = Date.now(); pairTimer = setInterval(() => { if (signedIn || !myPairs().length || Date.now() - t0 > PAIR_MS) { clearInterval(pairTimer); pairTimer = null; return; } if (!document.hidden) claimPaired(); }, 3000); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !signedIn) claimPaired(); });
+function showGate(msg) {
+  $("gate").innerHTML = `<p style="margin:0 0 14px">${msg || "請先登入"}</p><button class="btn" id="lineBtn" style="background:#06C755">使用 LINE 登入</button>${isApp() ? `<div style="background:#fbf3ee;border-radius:14px;padding:12px;margin:16px auto 0;max-width:340px;text-align:left"><b style="font-size:12.5px">已經在 Safari 登入了？</b><p class="muted" style="margin:4px 0 8px;font-size:12px">回到這裡會自動登入；沒有的話，輸入 Safari 畫面上的 6 位數登入碼：</p><div style="display:flex;gap:8px"><input id="pairCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="例如 123456" style="flex:1;min-width:0;border:1px solid #eadbd1;border-radius:10px;padding:9px 11px;font-size:16px;letter-spacing:3px;background:#fffdf9"><button class="btn" id="pairGo">登入</button></div></div>` : ""}`;
+  $("lineBtn").onclick = () => lineSignIn().then((ok) => ok && enter()).catch((e) => showGate("登入失敗：" + esc(e.message || e)));
+  const go = $("pairGo"); if (go) go.onclick = async () => { const v = $("pairCode").value.replace(/\D/g, ""); if (v.length !== 6) return toast("請輸入 6 位數字"); const r = await lineAuth({ code: v }); if (!r.ok || !r.body.token_hash) return toast(r.body.error || "登入失敗"); await finishLogin(r.body.token_hash).catch((e) => toast("登入失敗：" + (e.message || e))); };
+}
+function pairedScreen(code) {
+  $("gate").hidden = false; $("head").hidden = true; $("app").hidden = true;
+  $("gate").innerHTML = `<img src="/admin-icon-192.png" width="88" height="88" alt="" style="border-radius:20px"><h3 style="margin:12px 0 6px">LINE 登入完成</h3><p class="muted" style="line-height:1.8;margin:0">現在可以關掉這個瀏覽器，回到手機主畫面打開<b>小熊後台</b>，它會自動登入。</p>${code ? `<p class="muted" style="margin:12px 0 4px;font-size:12px">如果沒有自動登入，在後台 App 輸入這組登入碼（10 分鐘內有效）：</p><div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#a66f72;background:#f6e9e5;border-radius:14px;padding:8px 16px;display:inline-block">${esc(code)}</div>` : ""}<p class="muted" style="font-size:11.5px;margin-top:12px">只有第一次需要這樣，之後打開 App 都會保持登入。</p>`;
+}
 async function lineSignIn() {
   $("gate").innerHTML = "正在連到 LINE…";
   await liffReady();
   if (liff.isLoggedIn() && tokenStale()) { try { liff.logout(); } catch {} }
-  if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.origin + location.pathname }); return false; }
-  const r = await fetch("https://cwsxlfifpydxmmjsiwzg.supabase.co/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7" }, body: JSON.stringify({ idToken: liff.getIDToken() }) });
-  const b = await r.json().catch(() => ({}));
-  if (!r.ok || !b.token_hash) throw new Error(b.error || "LINE 登入失敗");
-  const { error } = await SB.auth.verifyOtp({ token_hash: b.token_hash, type: "magiclink" });
+  if (!liff.isLoggedIn()) {
+    let redirectUri = location.origin + location.pathname;
+    if (isApp()) { redirectUri += "?pair=" + currentPair(); watchPairs(); }
+    liff.login({ redirectUri }); return false;
+  }
+  const handOff = /^[A-Za-z0-9]{24,64}$/.test(BOOT_PAIR || "") && !myPairs().includes(BOOT_PAIR);
+  const r = await lineAuth(handOff ? { idToken: liff.getIDToken(), pair: BOOT_PAIR } : { idToken: liff.getIDToken() });
+  try { sessionStorage.removeItem("adm_boot_pair"); } catch {}
+  if (r.body.paired) { history.replaceState(null, "", location.pathname); pairedScreen(r.body.code); return false; }
+  if (!r.ok || !r.body.token_hash) throw new Error(r.body.error || "LINE 登入失敗");
+  const { error } = await SB.auth.verifyOtp({ token_hash: r.body.token_hash, type: "magiclink" });
   if (error) throw error;
+  clearPairs(); signedIn = true;
   history.replaceState(null, "", location.pathname);
   return true;
+}
+// ---- phone app + notifications ----
+const VAPID = "BM2rjrxMX-qgEIz8rnOkN_gC1aywURPYw9tZ0Jdoo08sjg0sSwAQMCRnyKQlIXkxjMmsbxARBMVO02_IZG1sYHY";
+const b64u = (x) => { const p = "=".repeat((4 - (x.length % 4)) % 4), r = atob((x + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(r, (c) => c.charCodeAt(0)); };
+let swReg = null;
+async function registerSW() { if (!("serviceWorker" in navigator)) return null; try { swReg = await navigator.serviceWorker.register("/sw.js"); } catch (e) { console.warn(e); } return swReg; }
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.type === "admin-refresh" && signedIn) load(); });
+async function pushState() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return isIOS() && !isApp() ? "needApp" : "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  const reg = swReg || (await navigator.serviceWorker.getRegistration("/")); const sub = reg && (await reg.pushManager.getSubscription());
+  if (!sub) return "off";
+  const { data } = await SB.from("push_subs").select("apps").eq("endpoint", sub.endpoint).maybeSingle();
+  return data && (data.apps || []).includes("admin") ? "on" : "off";
+}
+async function enablePush(btn) {
+  try {
+    btn.disabled = true;
+    if ((await Notification.requestPermission()) !== "granted") return toast("沒有允許通知。請到手機「設定」→「通知」→「小熊後台」打開");
+    const reg = swReg || (await registerSW()) || (await navigator.serviceWorker.ready);
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(VAPID) }));
+    const { error } = await SB.rpc("push_sub_save", { p_sub: sub.toJSON(), p_app: "admin" }); if (error) throw error;
+    try { await reg.showNotification("小熊後台", { body: "手機通知開好了！有付款通知、意見回饋時會通知你", icon: "/admin-icon-192.png", tag: "adm-test", data: { url: location.pathname } }); } catch {}
+    toast("手機通知開好了");
+  } catch (e) { toast("開啟通知失敗：" + (e.message || e)); } finally { btn.disabled = false; renderAppCard(); }
+}
+async function disablePush() {
+  try { const reg = swReg || (await navigator.serviceWorker.getRegistration("/")), sub = reg && (await reg.pushManager.getSubscription()); if (sub) { const { data: left } = await SB.rpc("push_sub_remove", { p_endpoint: sub.endpoint, p_app: "admin" }); if (!left) await sub.unsubscribe(); } toast("後台不會再傳手機通知"); } catch (e) { toast("關閉失敗：" + (e.message || e)); }
+  renderAppCard();
+}
+async function renderAppCard() {
+  const box = $("appCard"); if (!box) return;
+  const st = await pushState().catch(() => "unsupported");
+  let html = "";
+  if (!isApp()) html = `<div class="card" style="background:#f3f6fb;border-color:#dfe7f1"><b>📱 把後台加到手機主畫面</b><p class="muted" style="margin:4px 0 0;line-height:1.7">${isIOS() ? "用 Safari 打開這頁 → 按下方「分享」→「加入主畫面」，名稱會是「小熊後台」。之後直接點圖示就能打開，不用重新登入，也能收到付款、意見回饋的手機通知。" : "在 Chrome 選單按「安裝應用程式」或「加到主畫面」。之後直接點圖示就能打開，也能收到手機通知。"}</p></div>`;
+  if (st === "off") html += `<div class="card" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>🔔 手機通知還沒開</b><div class="muted">開啟後，老師送出付款通知、意見回饋時，這支手機會跳通知。</div></div><button class="btn" id="pushOn">開啟手機通知</button></div>`;
+  else if (st === "on") html += `<div class="card" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>🔔 這支手機會收到後台通知</b><div class="muted">付款通知、意見回饋</div></div><button class="btn o s" id="pushOff">關閉</button></div>`;
+  else if (st === "denied") html += `<div class="card"><b>🔕 通知被關掉了</b><div class="muted">請到手機「設定」→「通知」→「小熊後台」打開。</div></div>`;
+  box.innerHTML = html;
+  const on = $("pushOn"); if (on) on.onclick = () => enablePush(on);
+  const off = $("pushOff"); if (off) off.onclick = disablePush;
 }
 async function enter() {
   const { data: ok } = await SB.rpc("is_admin");
   if (!ok) return notFound();
-  $("gate").hidden = true; $("head").hidden = false; $("app").hidden = false; load();
+  signedIn = true; $("gate").hidden = true; $("head").hidden = false; $("app").hidden = false; registerSW().then(renderAppCard); load();
 }
 $("logout").onclick = async () => { await SB.auth.signOut(); try { if (window.liff && liff.isLoggedIn()) liff.logout(); } catch {} location.replace(location.pathname); };
 (async () => {
   try {
-    const back = /[?&](code|liffClientId|liff\.state)=/.test(location.search);
+    const back = /[?&](code|liffClientId|liff\.state|pair)=/.test(location.search);
     let { data } = await SB.auth.getSession();
-    if (!data.session && back) { if (await lineSignIn()) ({ data } = await SB.auth.getSession()); else return; }
-    if (!data.session) {
-      $("gate").innerHTML = '<p style="margin:0 0 14px">請先登入</p><button class="btn" id="lineBtn" style="background:#06C755">使用 LINE 登入</button>';
-      $("lineBtn").onclick = () => lineSignIn().then((ok) => ok && enter()).catch((e) => { $("gate").textContent = "登入失敗：" + (e.message || e); });
-      return;
-    }
+    // back in Safari for a login started in the home-screen app: hand it over even if this browser is signed in
+    const handOff = back && BOOT_PAIR && !myPairs().includes(BOOT_PAIR);
+    if ((!data.session || handOff) && back) { if (await lineSignIn()) ({ data } = await SB.auth.getSession()); else return; }
+    if (!data.session) { showGate(); if (myPairs().length) watchPairs(); return; }
     await enter();
   } catch (e) { $("gate").textContent = "登入失敗：" + (e.message || e); }
 })();

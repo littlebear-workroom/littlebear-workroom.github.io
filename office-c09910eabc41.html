@@ -40,13 +40,14 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="features.js?v=20261026022256"></script>
 <script>
+const FEATURES = Object.fromEntries((window.BEAR_FEATURES || []).map((f) => [f.key, f.name]));
+const AI_REG = Object.fromEntries((window.BEAR_AI_KINDS || []).map((k) => [k.kind, k]));
+let AI_KINDS = Object.fromEntries(Object.values(AI_REG).map((k) => [k.kind, k.name]));
 const SB = supabase.createClient("https://cwsxlfifpydxmmjsiwzg.supabase.co", "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7", { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const FEATURES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", attendance: "出缺勤點名", logs: "週誌月報", team: "班級共享（多位老師）", ai: "AI 小幫手" };
-const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）", notice: "寫家長通知", journal: "寫週誌／月報" };
-const AI_COST_NT = { routine: 1, roster: 1, bus: 1, motor: 1, calendar: 3, lesson: 0.8, lessonChat: 2 }; // measured average cost per task (NT$)
 let D = null, U = null, FB = [], AN = [], tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
 const fd = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
@@ -57,9 +58,21 @@ function subTag(s, via) {
   const cls = l <= 0 ? "t-ro" : s.status === "trial" ? "t-trial" : "t-active";
   return `<span class="tag ${cls}">${esc(name)}</span><div class="muted">${l <= 0 ? "已到期（唯讀）" : l > 3650 ? "長期有效" : `到 ${fd(s.ends_at)}・剩 ${l} 天`}${s.seats ? `・${s.seats} 位` : ""}</div><div class="muted">AI 已用 ${s.ai_used}${s.ai_bonus ? `・加購剩 ${s.ai_bonus}` : ""}</div>`;
 }
+async function syncCatalog(data) {
+  const feats = (window.BEAR_FEATURES || []).map((f) => f.key), keys = {}, kinds = {};
+  (window.BEAR_FEATURES || []).forEach((f) => (f.data || []).forEach((d) => { keys[d] = f.key; }));
+  (window.BEAR_AI_KINDS || []).forEach((k) => { kinds[k.kind] = k.points; });
+  const plansMissing = (data.plans || []).some((p) => feats.some((f) => !(f in (p.features || {})))), costsMissing = Object.keys(kinds).some((k) => !((data.settings.ai_costs || {})[k] >= 0)), keysDiff = JSON.stringify(data.settings.feature_keys || {}) !== JSON.stringify(keys);
+  if (!plansMissing && !costsMissing && !keysDiff) return null;
+  const { data: r, error } = await SB.rpc("admin_sync_catalog", { p_features: feats, p_keys: keys, p_kinds: kinds });
+  return error ? null : r;
+}
 async function load() {
   const [{ data, error }, us, fb, an] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage"), SB.rpc("admin_feedback"), SB.rpc("admin_announcements")]);
   FB = fb.data || []; AN = an.data || [];
+  // AI tasks known from settings or usage but not in features.js still show up
+  Object.keys({ ...(data?.settings?.ai_costs || {}), ...(us.data?.by_kind || {}) }).forEach((k) => { if (!AI_KINDS[k] && k !== "admin" && k !== "topup" && k !== "refund") AI_KINDS[k] = k; });
+  if (!window.__synced && data) { window.__synced = true; const r = await syncCatalog(data); if (r && (r.features_added || r.ai_kinds_added)) { toast(`已自動加入 ${r.features_added} 個新功能、${r.ai_kinds_added} 種新的 AI 工作`); return load(); } }
   if (error) { $("gate").hidden = false; $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
   D = data; U = us.data || { by_user: {}, by_ws: {}, paid_user: {}, paid_ws: {}, total: {}, by_kind: {}, usd_twd: 32 }; render();
 }
@@ -105,8 +118,8 @@ async function detailDialog(type, id) {
 }
 // ---------- pricing advisor ----------
 // measured average cost per call (NT$) used until there is enough real data
-const DEFAULT_CALL_NT = { notice: 0.6, journal: 3, routine: 0.9, roster: 1, bus: 1, motor: 1, calendar: 3.5, lesson: 0.8, lessonChat: 2.1 };
-const DEFAULT_MIX = { lessonChat: 0.4, lesson: 0.15, routine: 0.1, roster: 0.1, calendar: 0.1, bus: 0.05, motor: 0.1 }; // share of calls
+const DEFAULT_CALL_NT = new Proxy({}, { get: (_, k) => AI_REG[k]?.estNT });
+const DEFAULT_MIX = new Proxy({}, { get: (_, k) => AI_REG[k]?.share ?? 0.02 });
 function advSettings() {
   const a = D.settings.pricing || {};
   return { margin: a.margin ?? 40, fee: a.fee ?? 2.8, usage: a.usage ?? 70, subs: a.subs ?? 20, fixed: a.fixed || [{ name: "Supabase Pro 主機", amount: 800 }, { name: "LINE 官方帳號", amount: 0 }, { name: "網址", amount: 50 }] };

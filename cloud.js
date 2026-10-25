@@ -610,8 +610,9 @@
   // ---------- boot ----------
   // ---------- plan / subscription ----------
   let access = null, catalog = null, roWarned = false;
-  const FEATURE_OF_VIEW = { funds: "funds", supplies: "supplies", forms: "forms", students: "students", roster: "roster", routine: "routine", chores: "chores", tasks: "tasks", schedule: "schedule", lessons: "lessons", motor: "motor", training: "training", calendar: "calendar", afterschool: "afterschool", bus: "bus", files: "indicators", team: "team", attendance: "attendance", logs: "logs" };
-  const FEATURE_NAMES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", attendance: "出缺勤點名", logs: "週誌月報", team: "班級共享（多位老師）", ai: "AI 小幫手" };
+  const FEATS = window.BEAR_FEATURES || [];
+  const FEATURE_OF_VIEW = Object.fromEntries(FEATS.flatMap((f) => (f.views || []).map((v) => [v, f.key])));
+  const FEATURE_NAMES = Object.fromEntries(FEATS.map((f) => [f.key, f.name]));
   const isRO = () => !!(access && access.state === "readonly");
   const hasFeature = (f) => !access || access.state === "guest" || !access.features || access.features[f] !== false && (access.features[f] === true || access.features[f] === undefined);
   async function loadAccess() { if (!sb || !user) return null; try { const { data, error } = await sb.rpc("my_access", { p_ws: ws ? ws.id : null }); if (!error) access = data; } catch (e) { console.warn(e); } window.bearAccess = access; return access; }
@@ -655,7 +656,7 @@
     }
     if (!catalog) { try { const { data } = await sb.rpc("plan_catalog"); catalog = data; } catch {} }
     const c = catalog || { plans: [], topups: [] }, costs = c.ai_costs || {};
-    const COST_NAMES = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）", notice: "寫家長通知", journal: "寫週誌／月報" };
+    const COST_NAMES = Object.fromEntries((window.BEAR_AI_KINDS || []).map((k) => [k.kind, k.name]));
     view.innerHTML = `<h2 class="page-title">方案與續約 <span class=illus-star aria-hidden=true></span></h2><p class="page-sub">${access ? `目前方案：<b>${escH(access.plan || "")}</b>${access.ends_at ? `・${isRO() ? "已到期" : "到期日 " + fmtD(access.ends_at)}` : ""}` : ""}</p>
       ${c.plans.map((p) => `<article class="lesson-card plan-offer ${access && access.plan_id === p.id ? "current" : ""}"><div class="plan-offer-top"><div><h4>${escH(p.name)}</h4><p>${escH(p.description || "")}</p></div>${access && access.plan_id === p.id ? '<span class="plan-state active">目前方案</span>' : ""}</div>
         <div class="plan-price"><b>NT$${p.price_month}</b><small>／月</small>${p.price_year ? `<span>年繳 NT$${p.price_year.toLocaleString()}（省 NT$${(p.price_month * 12 - p.price_year).toLocaleString()}）</span>` : ""}</div>

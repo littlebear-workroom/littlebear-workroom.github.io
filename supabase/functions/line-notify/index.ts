@@ -69,7 +69,7 @@ function activeChores(list: Chore[], T: string) {
 }
 
 // ---------- message text ----------
-type Data = { tasks?: any[]; chores?: Chore[]; cal?: any[]; prefs?: any };
+type Data = { tasks?: any[]; chores?: Chore[]; cal?: any[]; prefs?: any; leaveSoon?: any[] };
 function dailyText(d: Data, T: string, withTomorrow: boolean) {
   const tasks = (d.tasks || []).filter((t) => t.date === T && !t.done);
   const overdue = (d.tasks || []).filter((t) => !t.done && t.date && t.date < T && t.date >= addDays(T, -60)).sort((a, b) => a.date.localeCompare(b.date));
@@ -78,13 +78,15 @@ function dailyText(d: Data, T: string, withTomorrow: boolean) {
   const tm = addDays(T, 1);
   const tTasks = withTomorrow ? (d.tasks || []).filter((t) => t.date === tm && !t.done) : [];
   const tCal = withTomorrow ? (d.cal || []).filter((e) => e.mine && !e.monthOnly && e.date === tm) : [];
-  if (!tasks.length && !overdue.length && !chores.length && !cal.length && !tTasks.length && !tCal.length) return "";
+  const soon = d.leaveSoon || [];
+  if (!tasks.length && !overdue.length && !chores.length && !cal.length && !tTasks.length && !tCal.length && !soon.length) return "";
   const L: string[] = [`小熊工作提醒 ♡ ${md(T)}`];
   if (overdue.length) L.push("", `⚠ 逾期還沒完成（${overdue.length}），請盡快處理`, ...overdue.slice(0, 8).map((t) => `・${t.title}（原定 ${md(t.date)}，逾期 ${diff(t.date, T)} 天）`), ...(overdue.length > 8 ? [`…還有 ${overdue.length - 8} 件`] : []));
   if (tasks.length) L.push("", `今天還沒完成的待辦（${tasks.length}）`, ...tasks.slice(0, 8).map((t) => `・${t.title}${t.time ? `（${t.time}）` : ""}`), ...(tasks.length > 8 ? [`…還有 ${tasks.length - 8} 件`] : []));
   if (chores.length) L.push("", "例行公事", ...chores.map((o) => { const n = diff(T, o.due); return `・${o.it.title}（${n === 0 ? "今天截止" : n > 0 ? md(o.due) + "前" : `已逾期 ${-n} 天`}）`; }));
   if (cal.length) L.push("", "今天行事曆上你負責的", ...cal.map((e) => `・${e.title}${e.time ? ` ${e.time}` : ""}`));
   if (tTasks.length || tCal.length) L.push("", "明天要記得", ...tTasks.map((t) => `・${t.title}${t.time ? `（${t.time}）` : ""}`), ...tCal.map((e) => `・${e.title}（我負責）`));
+  if (soon.length) L.push("", `📋 一週後你請假：${soon.map((x: any) => `${md(x.date)} ${x.type}`).join("、")}`, "還沒有代班交接單，需要的話打開小熊工作室建立（首頁就會提醒你）。");
   L.push("", "打開小熊工作室：https://liff.line.me/" + (Deno.env.get("LIFF_ID") || ""));
   return L.join("\n");
 }
@@ -115,10 +117,21 @@ async function push(to: string, text: string) {
   return { ok: false, status: r.status, error: body };
 }
 
-async function loadData(userId: string): Promise<Data> {
-  const { data } = await admin.from("personal_data").select("key,value").eq("user_id", userId).in("key", ["bear_tasks", "bear_chores", "bear_cal_events", "bear_notify_prefs"]);
+async function loadData(userId: string, today?: string): Promise<Data> {
+  const { data } = await admin.from("personal_data").select("key,value").eq("user_id", userId).in("key", ["bear_tasks", "bear_chores", "bear_cal_events", "bear_notify_prefs", "bear_leave_private", "bear_leave_plan", "bear_leaves"]);
   const m = new Map((data || []).map((r: any) => [r.key, r.value]));
-  return { tasks: m.get("bear_tasks") || [], chores: m.get("bear_chores") || [], cal: m.get("bear_cal_events") || [], prefs: m.get("bear_notify_prefs") || null };
+  // planned leave exactly 7 days from now that has no handover sheet yet
+  let plan: any[] = [...(m.get("bear_leave_private") || []), ...(m.get("bear_leave_plan") || [])], sheets: any[] = [...(m.get("bear_leaves") || [])];
+  const { data: ms } = await admin.from("workspace_members").select("workspace_id").eq("user_id", userId).eq("status", "active");
+  const wsIds = (ms || []).map((x: any) => x.workspace_id);
+  if (wsIds.length) {
+    const { data: sd } = await admin.from("shared_data").select("key,value").in("workspace_id", wsIds).in("key", ["bear_leave_plan", "bear_leaves"]);
+    for (const r of sd || []) (r.key === "bear_leave_plan" ? plan : sheets).push(...(Array.isArray(r.value) ? r.value : []));
+  }
+  const target = today ? addDays(today, 7) : "";
+  const covered = (x: any) => x.handover === "yes" || sheets.some((l: any) => (l.id === x.leaveId || l.byId === userId) && (l.days || []).some((d: any) => d.date === x.date));
+  const leaveSoon = target ? plan.filter((x: any) => x && x.byId === userId && x.date === target && !x.remindOff && !covered(x)) : [];
+  return { tasks: m.get("bear_tasks") || [], chores: m.get("bear_chores") || [], cal: m.get("bear_cal_events") || [], prefs: m.get("bear_notify_prefs") || null, leaveSoon };
 }
 async function alreadySent(userId: string, kind: string, day: string) {
   const { data } = await admin.from("notify_log").select("kind").eq("user_id", userId).eq("kind", kind).eq("day", day).maybeSingle();
@@ -138,7 +151,7 @@ Deno.serve(async (req) => {
       if (!u?.user) return json({ error: "請先登入" }, 401);
       const { data: p } = await admin.from("profiles").select("line_user_id, display_name").eq("id", u.user.id).maybeSingle();
       if (!p?.line_user_id) return json({ error: "找不到你的 LINE 帳號，請重新用 LINE 登入" }, 400);
-      const d = await loadData(u.user.id);
+      const d = await loadData(u.user.id, now.iso);
       const text = dailyText(d, now.iso, true) || `小熊工作提醒 ♡ ${md(now.iso)}\n今天沒有要提醒的事情，輕鬆一下吧！`;
       const r = await push(p.line_user_id, "【測試通知】\n" + text);
       return json(r.ok ? { ok: true } : { error: r.status === 400 || r.status === 403 ? "傳送失敗：請先加「熊班」為 LINE 好友" : r.error }, r.ok ? 200 : 400);
@@ -170,7 +183,7 @@ Deno.serve(async (req) => {
       const { data: people } = await admin.from("profiles").select("id, line_user_id").not("line_user_id", "is", null);
       let sent = 0;
       for (const p of people || []) {
-        const d = await loadData(p.id), pr = d.prefs;
+        const d = await loadData(p.id, now.iso), pr = d.prefs;
         if (!pr) continue; // teacher hasn't saved notification settings yet
         const weekend = now.wd === 0 || now.wd === 6 || (await isHoliday(now.iso));
         if (weekend && pr.weekendOff !== false) continue;

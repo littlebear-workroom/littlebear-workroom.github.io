@@ -186,7 +186,7 @@ Deno.serve(async (req) => {
     let data: unknown;
     try { data = JSON.parse(text); } catch { return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
     const d: any = data;
-    console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length, sample: JSON.stringify(d).slice(0, 300) }));
+    console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length }));  // counts only: never log what was read (it can contain children's names)
     return json({ ok: true, data, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e), fallback: true }, 500);

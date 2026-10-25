@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
     if (last && Date.now() - new Date(last.sent_at).getTime() < QUIET_MINUTES * 60e3) return json({ ok: true, skipped: "quiet" });
     await admin.from("push_log").upsert({ workspace_id: ws, key: logKey, sent_at: new Date().toISOString() });
     const [{ data: members }, { data: w }, { data: who }] = await Promise.all([
-      admin.from("workspace_members").select("user_id").eq("workspace_id", ws),
+      admin.from("workspace_members").select("user_id").eq("workspace_id", ws).eq("status", "active"),
       admin.from("workspaces").select("name").eq("id", ws).maybeSingle(),
       by ? admin.from("profiles").select("display_name").eq("id", by).maybeSingle() : Promise.resolve({ data: null }),
     ]);

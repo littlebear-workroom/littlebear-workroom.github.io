@@ -1,6 +1,7 @@
 // 小熊工作室 cloud sync: LINE sign-in (LIFF) + Supabase.
-// The app keeps working from localStorage exactly as before. This file signs the teacher in,
-// mirrors the bear_* keys to the cloud, and pulls classmates' changes back.
+// Class and personal data (student names, contacts, rosters…) live only on the server and in this
+// page's memory: nothing is written to the phone's storage. The app's own code still calls
+// localStorage as before; for data keys those calls are answered from memory and mirrored to the server.
 (function () {
   "use strict";
   const CFG = {
@@ -24,8 +25,17 @@
   const LS = window.localStorage;
   const rawSet = Storage.prototype.setItem;
   const rawGet = Storage.prototype.getItem;
-  const meta = () => { try { return JSON.parse(rawGet.call(LS, "bear_cloud_meta") || "{}"); } catch { return {}; } };
-  const saveMeta = (m) => rawSet.call(LS, "bear_cloud_meta", JSON.stringify(m));
+  const rawRemove = Storage.prototype.removeItem;
+  // ---------- memory-only store for data ----------
+  const MEM = new Map();
+  const isData = (k) => SHARED.includes(k) || PERSONAL.includes(k) || k === "bear_cloud_meta" || k === "bear_team";
+  // Copies left on this device by older versions: load them into memory (so unsynced edits still reach
+  // the server), then delete them from the device once the server has everything.
+  const LEGACY = [];
+  for (const k of [...SHARED, ...PERSONAL, "bear_cloud_meta", "bear_team"]) { const v = rawGet.call(LS, k); if (v != null) { MEM.set(k, v); LEGACY.push(k); } }
+  function wipeLegacy() { LEGACY.splice(0).forEach((k) => { try { rawRemove.call(LS, k); } catch {} }); }
+  const meta = () => { let m = {}; try { m = JSON.parse(MEM.get("bear_cloud_meta") || "{}") || {}; } catch {} try { const w = JSON.parse(rawGet.call(LS, "bear_cloud_ws") || "null"); if (w && !("ws" in m)) m.ws = w; } catch {} return m; };
+  const saveMeta = (m) => { MEM.set("bear_cloud_meta", JSON.stringify(m)); try { rawSet.call(LS, "bear_cloud_ws", JSON.stringify(m.ws ? { id: m.ws.id, name: m.ws.name } : null)); } catch {} };
   const toast = (m) => (window.showToast ? window.showToast(m) : console.log(m));
   const escH = (s) => (window.esc ? window.esc(s) : String(s ?? ""));
 
@@ -36,12 +46,25 @@
   const KEEP_ALWAYS = ["bear_cloud_meta", "bear_cloud_auth", "bear_login_msg"];
   let guest = !rawGet.call(LS, "bear_cloud_auth");
   Storage.prototype.setItem = function (k, v) {
-    if (this === LS && guest && String(k).startsWith("bear_") && !KEEP_ALWAYS.includes(k) && !String(k).startsWith("bear_cloud")) return; // signed out: keep only in memory
+    if (this === LS && isData(k)) {
+      MEM.set(k, String(v));
+      if (!muted && user && !guest && (SHARED.includes(k) || PERSONAL.includes(k))) queuePush(k);
+      return;
+    }
     rawSet.call(this, k, v);
-    if (this === LS && !muted && user && (SHARED.includes(k) || PERSONAL.includes(k))) queuePush(k);
   };
-  function writeLocal(k, value) { muted = true; try { rawSet.call(LS, k, typeof value === "string" ? value : JSON.stringify(value)); } finally { muted = false; } }
-  function readLocal(k) { const v = rawGet.call(LS, k); if (v == null) return undefined; try { return JSON.parse(v); } catch { return v; } }
+  Storage.prototype.getItem = function (k) { if (this === LS && isData(k)) return MEM.has(k) ? MEM.get(k) : null; return rawGet.call(this, k); };
+  Storage.prototype.removeItem = function (k) { if (this === LS && isData(k)) { MEM.delete(k); return; } return rawRemove.call(this, k); };
+  function writeLocal(k, value) { MEM.set(k, typeof value === "string" ? value : JSON.stringify(value)); }
+  function readLocal(k) { const v = MEM.get(k); if (v == null) return undefined; try { return JSON.parse(v); } catch { return v; } }
+  // ---------- the app itself starts only after its data has arrived from the server ----------
+  let appStarted = false;
+  function startApp() {
+    if (appStarted || window.__bearStarted) { appStarted = true; return; } appStarted = true; window.__bearStarted = true;
+    const src = document.getElementById("bearApp");
+    if (src) { const sc = document.createElement("script"); sc.textContent = src.textContent; document.body.appendChild(sc); }
+    const ld = document.getElementById("bearLoading"); if (ld) ld.remove();
+  }
 
   // ---------- 3-way merge so two teachers editing at once don't lose each other's changes ----------
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -144,8 +167,9 @@
     if (changed && reloadIfChanged) reloadApp();
     return changed;
   }
-  function reloadApp() {
+  async function reloadApp() {
     try { sessionStorage.setItem("bear_cloud_reloaded", String(Date.now())); } catch {}
+    try { await Promise.race([flushDirty(), new Promise((r) => setTimeout(r, 3000))]); } catch {}
     location.reload();
   }
 
@@ -179,9 +203,9 @@
 
   // ---------- classes (workspaces) ----------
   async function loadWorkspaces() {
-    const { data, error } = await sb.from("workspace_members").select("role, workspaces(id,name,invite_code)").eq("user_id", user.id);
+    const { data, error } = await sb.from("workspace_members").select("role, status, workspaces(id,name,invite_code)").eq("user_id", user.id);
     if (error) throw error;
-    return (data || []).map((r) => ({ ...r.workspaces, role: r.role }));
+    return (data || []).filter((r) => r.workspaces).map((r) => ({ ...r.workspaces, role: r.role, status: r.status || "active", invite_code: r.status === "pending" ? "" : r.workspaces.invite_code }));
   }
   async function chooseWorkspace(w, { upload = false } = {}) {
     ws = w || null;
@@ -308,14 +332,15 @@
   async function signOut() {
     await sb.auth.signOut(); user = null; ws = null; if (channel) sb.removeChannel(channel);
     try { if (window.liff && liff.isLoggedIn && liff.isLoggedIn()) liff.logout(); } catch {}
-    const drop = []; for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k.startsWith("bear_") && !k.startsWith("bear_cloud")) drop.push(k); }
-    drop.forEach((k) => LS.removeItem(k)); LS.removeItem("bear_cloud_meta");
+    MEM.clear(); wipeLegacy();
+    const drop = []; for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k && k.startsWith("bear_") && !["bear_hol_cache", "bear_ind_age"].includes(k)) drop.push(k); }
+    drop.forEach((k) => { try { rawRemove.call(LS, k); } catch {} });
     toast("已登出，你的資料都安全存在雲端");
     setTimeout(() => location.reload(), 900);
   }
   async function afterSignIn(fresh) {
     const list = await loadWorkspaces();
-    const saved = meta().ws, pickWs = list.find((w) => saved && w.id === saved.id) || (list.length === 1 ? list[0] : null);
+    const act = list.filter((w) => w.status !== "pending"), saved = meta().ws, pickWs = act.find((w) => saved && w.id === saved.id) || (act.length === 1 ? act[0] : null);
     ws = pickWs; const m = meta(); m.ws = ws ? { id: ws.id, name: ws.name } : null; saveMeta(m);
     subscribe();
     renderCloudUI(list);
@@ -383,10 +408,14 @@
     const ls = lastList || (await loadWorkspaces());
     lastList = ls;
     let members = [];
-    if (ws) { const { data } = await sb.from("workspace_members").select("role, user_id").eq("workspace_id", ws.id); const ids = (data || []).map((m) => m.user_id); const { data: ps } = ids.length ? await sb.from("profiles").select("id, display_name").in("id", ids) : { data: [] }; const nm = new Map((ps || []).map((p) => [p.id, p.display_name])); members = (data || []).map((m) => ({ ...m, profiles: { display_name: nm.get(m.user_id) } })); }
-    team.innerHTML = `${ls.length ? `<div class="field"><label>目前使用的班級</label><select id="cloudWsSel">${ls.map((w) => `<option value="${w.id}" ${ws && w.id === ws.id ? "selected" : ""}>${escH(w.name)}${w.role === "owner" ? "（建立者）" : ""}</option>`).join("")}<option value="">（不使用班級，資料只存在這台裝置）</option></select></div>` : ""}
-      ${ws ? `<div class="cloud-code"><small>邀請碼（給同班老師輸入）</small><b>${escH(ls.find((w) => w.id === ws.id)?.invite_code || "")}</b><div class="rt-actions"><button type="button" class="outline-btn" id="cloudCopy">複製邀請碼</button>${ls.find((w) => w.id === ws.id)?.role === "owner" ? `<button type="button" class="outline-btn" id="cloudRenew">換一組新的邀請碼</button>` : ""}<button type="button" class="outline-btn" id="cloudLeave">退出這個班級</button></div></div><div class="small-note" style="margin:10px 0 4px">班級成員（${members.length}）</div><div class="fm-chips">${members.map((m) => `<span class="tag ${m.role === "owner" ? "" : "green"}">${escH(m.profiles?.display_name || "老師")}${m.role === "owner" ? " · 建立者" : ""}</span>`).join("")}</div>` : ""}
+    if (ws) { const { data } = await sb.from("workspace_members").select("role, user_id, status").eq("workspace_id", ws.id); const ids = (data || []).map((m) => m.user_id); const { data: ps } = ids.length ? await sb.from("profiles").select("id, display_name").in("id", ids) : { data: [] }; const nm = new Map((ps || []).map((p) => [p.id, p.display_name])); members = (data || []).map((m) => ({ ...m, profiles: { display_name: nm.get(m.user_id) } })); }
+    team.innerHTML = `${ls.length ? `<div class="field"><label>目前使用的班級</label><select id="cloudWsSel">${ls.filter((w) => w.status !== "pending").map((w) => `<option value="${w.id}" ${ws && w.id === ws.id ? "selected" : ""}>${escH(w.name)}${w.role === "owner" ? "（建立者）" : ""}</option>`).join("")}<option value="">（不使用班級）</option></select></div>` : ""}
+      ${ws ? `<div class="cloud-code"><small>邀請碼（給同班老師輸入）</small><b>${escH(ls.find((w) => w.id === ws.id)?.invite_code || "")}</b><div class="rt-actions"><button type="button" class="outline-btn" id="cloudCopy">複製邀請碼</button>${ls.find((w) => w.id === ws.id)?.role === "owner" ? `<button type="button" class="outline-btn" id="cloudRenew">換一組新的邀請碼</button>` : ""}<button type="button" class="outline-btn" id="cloudLeave">退出這個班級</button></div></div>${(() => { const isOwner = ls.find((w) => w.id === ws.id)?.role === "owner", pend = members.filter((m) => m.status === "pending"), act = members.filter((m) => m.status !== "pending");
+        return `${pend.length && isOwner ? `<div class="motor-warn" style="margin:10px 0 4px"><b>有 ${pend.length} 位老師申請加入</b>，核准後對方才看得到班級資料（包含學生個資）。請確認是同班老師再核准。${pend.map((m) => `<div class="cloud-pend"><span>${escH(m.profiles?.display_name || "老師")}</span><button type="button" class="outline-btn" data-approve="${m.user_id}">核准</button><button type="button" class="outline-btn" data-reject="${m.user_id}">拒絕</button></div>`).join("")}</div>` : ""}<div class="small-note" style="margin:10px 0 4px">班級成員（${act.length}）</div><div class="fm-chips">${act.map((m) => `<span class="tag ${m.role === "owner" ? "" : "green"}">${escH(m.profiles?.display_name || "老師")}${m.role === "owner" ? " · 建立者" : ""}${isOwner && m.role !== "owner" ? ` <button type="button" class="cloud-x" data-reject="${m.user_id}" aria-label="移出班級">×</button>` : ""}</span>`).join("")}</div>`; })()}` : ""}
+      ${ls.filter((w) => w.status === "pending").map((w) => `<div class="motor-warn" style="margin-top:10px">已申請加入「${escH(w.name)}」，等班級建立者核准中。核准後重新打開 App 就能看到班級資料。</div>`).join("")}
       <div id="cloudLeaveConfirm" class="motor-warn" hidden></div>`;
+    team.querySelectorAll("[data-approve]").forEach((b) => b.onclick = async () => { const { error } = await sb.rpc("approve_member", { p_ws: ws.id, p_user: b.dataset.approve }); if (error) return toast("核准失敗：" + error.message); toast("已核准，對方重新打開 App 就能看到班級資料"); renderCloudUI(); });
+    team.querySelectorAll("[data-reject]").forEach((b) => b.onclick = async () => { if (!confirm("確定要把這位老師移出班級嗎？對方將看不到班級資料。")) return; const { error } = await sb.from("workspace_members").delete().eq("workspace_id", ws.id).eq("user_id", b.dataset.reject); if (error) return toast("移除失敗：" + error.message); toast("已移出班級"); renderCloudUI(); });
     const sel = document.getElementById("cloudWsSel");
     if (sel) sel.onchange = () => chooseWorkspace(ls.find((w) => w.id === sel.value) || null);
     const copy = document.getElementById("cloudCopy");
@@ -417,8 +446,11 @@
     const code = (document.getElementById("joinCode")?.value || "").trim();
     if (!code) { toast("請輸入邀請碼"); return; }
     const { data, error } = await sb.rpc("join_workspace", { p_code: code });
-    if (error) return toast(/not found/.test(error.message) ? "找不到這個邀請碼，請再確認一次" : "加入失敗：" + error.message);
+    if (error) return toast("加入失敗：" + error.message);
+    if (data?.error === "too_many") return toast("輸入錯誤太多次，請一小時後再試");
+    if (data?.error) return toast("找不到這個邀請碼，請再確認一次");
     lastList = await loadWorkspaces();
+    if (data.status === "pending") { renderCloudUI(lastList); return toast(`已送出加入「${escH(data.name)}」的申請，等班級建立者核准後就能看到班級資料`); }
     await chooseWorkspace(lastList.find((w) => w.id === data.id));
     toast(`已加入「${escH(data.name)}」，班級資料會自動同步`);
   }
@@ -548,7 +580,7 @@
   // ---------- backup (moving data from the old desktop file) ----------
   function exportBackup() {
     const out = {};
-    for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k.startsWith("bear_") && k !== "bear_cloud_meta") out[k] = rawGet.call(LS, k); }
+    for (const [k, v] of MEM) if (k !== "bear_cloud_meta") out[k] = v;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: "little-bear-workroom", exportedAt: new Date().toISOString(), data: out })], { type: "application/json" }));
     a.download = `小熊工作室備份_${new Date().toISOString().slice(0, 10)}.json`;
@@ -566,9 +598,26 @@
   }
 
   // ---------- boot ----------
+  async function preload() {
+    const list = await loadWorkspaces();
+    lastList = list;
+    const saved = meta().ws, pickWs = list.find((w) => w.status !== "pending" && saved && w.id === saved.id) || (list.filter((w) => w.status !== "pending").length === 1 ? list.find((w) => w.status !== "pending") : null);
+    ws = pickWs; const m = meta(); m.ws = ws ? { id: ws.id, name: ws.name } : null; saveMeta(m);
+    await pull({ reloadIfChanged: false });
+    await flushDirty();
+  }
   async function boot() {
+    let loadFailed = false;
+    if (window.supabase) {
+      sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
+      try { const { data } = await sb.auth.getSession(); user = data.session?.user || null; } catch (e) { console.error(e); }
+    }
+    guest = !user;
+    if (user) { try { await preload(); } catch (e) { console.error(e); loadFailed = true; } }
+    else wipeLegacy();
+    startApp();
     const css = document.createElement("style");
-    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.app-steps{margin:8px 0 4px;padding-left:20px;font-size:12px;line-height:1.9;color:#6e5d54}.app-ok{color:#728369!important;margin:10px 0 6px!important;line-height:1.7}#appCard .rt-actions,#appCardLogin .rt-actions{margin-top:8px}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
+    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.app-steps{margin:8px 0 4px;padding-left:20px;font-size:12px;line-height:1.9;color:#6e5d54}.app-ok{color:#728369!important;margin:10px 0 6px!important;line-height:1.7}#appCard .rt-actions,#appCardLogin .rt-actions{margin-top:8px}.cloud-pend{display:flex;align-items:center;gap:8px;margin-top:8px}.cloud-pend span{flex:1;font-weight:700}.cloud-pend .outline-btn{padding:6px 12px}.cloud-x{background:transparent;color:inherit;padding:0 0 0 4px;font-size:13px}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
     document.head.appendChild(css);
     installGuestUI();
     window.startLineLogin = startLogin;
@@ -593,10 +642,7 @@
     if (bf) bf.addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) importBackup(f); e.target.value = ""; });
     const be = document.getElementById("backupExport");
     if (be) be.onclick = exportBackup;
-    if (!window.supabase) { setGuest(true); renderCloudUI(); return; }
-    sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
-    const { data } = await sb.auth.getSession();
-    user = data.session?.user || null;
+    if (!sb) { setGuest(true); renderCloudUI(); return; }
     // Back from LINE for a login started in the home-screen app: hand it to the app even if this browser is already signed in.
     if (BOOT_PAIR && !myPairs().includes(BOOT_PAIR) && CFG.liffId && /[?&](code|liffClientId|liff\.state|pair)=/.test(location.search)) {
       setGuest(!user); renderCloudUI();
@@ -604,7 +650,10 @@
       catch (e) { console.error(e); report("登入失敗：" + (e.message || e)); }
     }
     setGuest(!user);
-    if (user) { try { await afterSignIn(false); } catch (e) { console.error(e); setStatus("暫時無法同步，連上網路後會自動重試"); } }
+    if (user) {
+      subscribe(); renderCloudUI(lastList); renderAppCards(); renderPairCodeBox();
+      if (loadFailed) setStatus("連不到雲端，現在看到的不是最新資料，修改也還沒存到雲端；連上網路後會自動重試"); else wipeLegacy();
+    }
     else {
       renderCloudUI();
       // coming back from the LINE login page

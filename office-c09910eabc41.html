@@ -53,7 +53,7 @@ textarea[data-af=body]{min-height:170px;resize:vertical}
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261026031602"></script>
+<script src="features.js?v=20261026032135"></script>
 <script>
 // Read before LINE's SDK tidies the address bar: set when the login was started from the home-screen app.
 const BOOT_PAIR = (() => { let t = location.search + location.hash, v = ""; for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } } try { if (v) sessionStorage.setItem("adm_boot_pair", v); else v = sessionStorage.getItem("adm_boot_pair") || ""; } catch {} return v; })();
@@ -63,7 +63,7 @@ let AI_KINDS = Object.fromEntries(Object.values(AI_REG).map((k) => [k.kind, k.na
 const SB = supabase.createClient("https://cwsxlfifpydxmmjsiwzg.supabase.co", "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7", { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-let D = null, U = null, FB = [], AN = [], tab = "home", q = "", usort = "cost";
+let D = null, U = null, FB = [], AN = [], AIM = {}, tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
 // yyyy-mm-dd in Taiwan time (toISOString would give the UTC date, a day early before 8am)
 const ymdTW = (d) => new Date((d === undefined ? Date.now() : new Date(d).getTime()) + 8 * 3600e3).toISOString().slice(0, 10);
@@ -125,8 +125,8 @@ async function syncCatalog(data) {
   return error ? null : r;
 }
 async function load() {
-  const [{ data, error }, us, fb, an] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage"), SB.rpc("admin_feedback"), SB.rpc("admin_announcements")]);
-  FB = fb.data || []; AN = an.data || [];
+  const [{ data, error }, us, fb, an, aim] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage"), SB.rpc("admin_feedback"), SB.rpc("admin_announcements"), SB.rpc("admin_ai_members")]);
+  FB = fb.data || []; AN = an.data || []; AIM = aim.data || {};
   // AI tasks known from settings or usage but not in features.js still show up
   Object.keys({ ...(data?.settings?.ai_costs || {}), ...(us.data?.by_kind || {}) }).forEach((k) => { if (!AI_KINDS[k] && k !== "admin" && k !== "topup" && k !== "refund") AI_KINDS[k] = k; });
   if (!window.__synced && data) { window.__synced = true; const r = await syncCatalog(data); if (r && (r.features_added || r.ai_kinds_added)) { toast(`已自動加入 ${r.features_added} 個新功能、${r.ai_kinds_added} 種新的 AI 工作`); return load(); } }
@@ -345,7 +345,7 @@ function usersHTML() {
 }
 function wsHTML() {
   const list = D.workspaces.filter((w) => match(w.name + " " + w.owner));
-  return `<input class="search" id="q" placeholder="搜尋班級或建立者" value="${esc(q)}"><p class="muted" style="margin:0 0 8px">班級沒有自己的方案時，會跟隨建立者的個人方案。要讓班級超過 3 位老師，在「方案設定」把人數調高，或記錄一筆加購人數的付款。</p><div class="card tw"><table><thead><tr><th>班級</th><th>建立者</th><th>老師人數</th><th>班級方案</th><th>AI 30 天</th><th></th></tr></thead><tbody>${list.map((w) => { const os = D.users.find((u) => u.id === w.owner_id)?.sub; return `<tr><td><b>${esc(w.name)}</b><div class="muted">${fd(w.created_at)}</div></td><td>${esc(w.owner || "")}</td><td>${w.members} 位${w.pending ? `<div class="muted">${w.pending} 位待核准</div>` : ""}</td><td>${w.sub ? subTag(w.sub) : `${subTag(null, true)}<div style="margin-top:4px">${os ? subTag(os) : ""}</div>`}</td><td>${w.ai_30d} 點</td><td><div class="acts"><button class="btn s" data-pay="workspace|${w.id}">記錄付款</button><button class="btn o s" data-sub="workspace|${w.id}">方案設定</button>${w.sub ? `<button class="btn o s" data-pts="workspace|${w.id}">加點數</button>` : ""}</div></td></tr>`; }).join("")}</tbody></table>${list.length ? "" : '<div class="empty">沒有符合的班級</div>'}</div>`;
+  return `<input class="search" id="q" placeholder="搜尋班級或建立者" value="${esc(q)}"><p class="muted" style="margin:0 0 8px">班級沒有自己的方案時，會跟隨建立者的個人方案。要讓班級超過 3 位老師，在「方案設定」把人數調高，或記錄一筆加購人數的付款。</p><div class="card tw"><table><thead><tr><th>班級</th><th>建立者</th><th>老師人數</th><th>班級方案</th><th>AI 30 天／本月每位老師</th><th></th></tr></thead><tbody>${list.map((w) => { const os = D.users.find((u) => u.id === w.owner_id)?.sub; return `<tr><td><b>${esc(w.name)}</b><div class="muted">${fd(w.created_at)}</div></td><td>${esc(w.owner || "")}</td><td>${w.members} 位${w.pending ? `<div class="muted">${w.pending} 位待核准</div>` : ""}</td><td>${w.sub ? subTag(w.sub) : `${subTag(null, true)}<div style="margin-top:4px">${os ? subTag(os) : ""}</div>`}</td><td>${w.ai_30d} 點${AIM[w.id] ? `<div class="muted" style="margin-top:4px;line-height:1.6">本月（${fd(AIM[w.id].since)} 起）<br>${AIM[w.id].members.map((m) => `${esc(m.name)} ${m.points} 點`).join("<br>")}</div>` : ""}</td><td><div class="acts"><button class="btn s" data-pay="workspace|${w.id}">記錄付款</button><button class="btn o s" data-sub="workspace|${w.id}">方案設定</button>${w.sub ? `<button class="btn o s" data-pts="workspace|${w.id}">加點數</button>` : ""}</div></td></tr>`; }).join("")}</tbody></table>${list.length ? "" : '<div class="empty">沒有符合的班級</div>'}</div>`;
 }
 function plansHTML() {
   return planAIHTML() + `<p class="muted" style="margin:0 0 8px">改好按「保存」，前台的方案頁和權限會立刻更新。「公開」打勾的方案才會出現在老師看到的方案頁。</p>${D.plans.map((p, i) => planForm(p, i)).join("")}<button class="btn o" data-newplan="1">＋ 新增方案</button>`;

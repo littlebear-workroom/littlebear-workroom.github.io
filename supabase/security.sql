@@ -52,3 +52,9 @@ end $$;
 revoke all on function public.approve_member(uuid, uuid) from public, anon;
 grant execute on function public.approve_member(uuid, uuid) to authenticated;
 revoke execute on function public.create_workspace(text), public.put_shared(uuid, text, jsonb, bigint), public.renew_invite_code(uuid), public.is_member(uuid) from public, anon;
+
+-- Hardening after the attack test (2026-10-25): teachers write only through the app's own paths.
+revoke insert, update, delete on public.profiles from authenticated;           -- set by the server at LINE sign-in only
+revoke insert, update on public.workspace_members from authenticated;          -- join/approve go through functions
+revoke insert, delete, update on public.workspaces from authenticated;         -- created through create_workspace
+grant update (name) on public.workspaces to authenticated;                     -- owner may rename (policy ws_update)

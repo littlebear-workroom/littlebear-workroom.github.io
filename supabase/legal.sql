@@ -18,3 +18,10 @@ create or replace function public.my_consents() returns jsonb language sql stabl
 $$;
 revoke all on function public.agree_terms(text), public.my_consents() from public, anon;
 grant execute on function public.agree_terms(text), public.my_consents() to authenticated;
+
+-- 6-digit login code: count tries so it cannot be guessed
+create table if not exists public.code_attempts (ip text not null, at timestamptz not null default now());
+create index if not exists code_attempts_at on public.code_attempts (at);
+alter table public.code_attempts enable row level security;
+revoke all on public.code_attempts from anon, authenticated;
+grant all on public.code_attempts to service_role;

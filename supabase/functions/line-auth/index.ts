@@ -34,6 +34,15 @@ Deno.serve(async (req) => {
     // Typed-in 6-digit code from the Safari page.
     if (code !== undefined) {
       if (!/^\d{6}$/.test(String(code))) return json({ error: "請輸入 6 位數字" }, 400);
+      const ip = (req.headers.get("x-forwarded-for") || req.headers.get("cf-connecting-ip") || "unknown").split(",")[0].trim().slice(0, 64);
+      const since = new Date(Date.now() - 10 * 60e3).toISOString();
+      const [{ count: mine }, { count: all }] = await Promise.all([
+        admin.from("code_attempts").select("*", { count: "exact", head: true }).eq("ip", ip).gte("at", since),
+        admin.from("code_attempts").select("*", { count: "exact", head: true }).gte("at", since),
+      ]);
+      if ((mine || 0) >= 10 || (all || 0) >= 200) return json({ error: "嘗試次數太多，請 10 分鐘後再試，或重新用 LINE 登入" }, 429);
+      await admin.from("code_attempts").insert({ ip });
+      await admin.from("code_attempts").delete().lt("at", new Date(Date.now() - 3600e3).toISOString());
       await new Promise((r) => setTimeout(r, 400)); // slow down guessing
       const { data } = await admin.from("login_pairs").delete().eq("code", String(code)).gte("created_at", new Date(Date.now() - 10 * 60e3).toISOString()).select("token_hash").maybeSingle();
       return data ? json({ token_hash: data.token_hash }) : json({ error: "登入碼不對或已經過期，請在 Safari 重新登入一次" }, 404);

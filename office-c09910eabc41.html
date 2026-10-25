@@ -31,6 +31,13 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#61524b;color:#fff;border-radius:14px;padding:10px 16px;font-size:13px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}.toast.on{opacity:1}
 .empty{padding:30px;text-align:center;color:var(--muted)}
 .kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.f input,.f select,.f textarea{width:100%;max-width:100%;min-width:0}
+input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;max-width:100%;min-width:0;min-height:38px;text-align:left;background:#fffdf9}
+input[type=date]::-webkit-date-and-time-value{text-align:left}
+input[type=checkbox],input[type=radio]{width:auto}
+textarea[data-af=body]{min-height:170px;resize:vertical}
+#logout{white-space:nowrap;flex:0 0 auto}
+@media (max-width:480px){header h1{font-size:17px}header small{font-size:10.5px}.row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
 <body>
@@ -45,7 +52,7 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261026025748"></script>
+<script src="features.js?v=20261026030355"></script>
 <script>
 // Read before LINE's SDK tidies the address bar: set when the login was started from the home-screen app.
 const BOOT_PAIR = (() => { let t = location.search + location.hash, v = ""; for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } } try { if (v) sessionStorage.setItem("adm_boot_pair", v); else v = sessionStorage.getItem("adm_boot_pair") || ""; } catch {} return v; })();
@@ -57,6 +64,8 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let D = null, U = null, FB = [], AN = [], tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
+// yyyy-mm-dd in Taiwan time (toISOString would give the UTC date, a day early before 8am)
+const ymdTW = (d) => new Date((d === undefined ? Date.now() : new Date(d).getTime()) + 8 * 3600e3).toISOString().slice(0, 10);
 const fd = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 const left = (iso) => Math.ceil((new Date(iso) - Date.now()) / 864e5);
 function subTag(s, via) {
@@ -226,7 +235,7 @@ function fbHTML() {
   return `<p class="muted" style="margin:0 0 8px">老師送出意見時，你的 LINE 會收到通知。回覆後老師的 LINE 也會收到。</p>${FB.length ? FB.map((f) => `<div class="card" style="${f.status === "open" ? "border:2px solid #efc28a" : ""}"><div class="acts" style="justify-content:space-between;align-items:center"><div><b>${esc(f.name || "老師")}</b> <span class="tag t-none">${esc(FB_CAT[f.category] || f.category)}</span> <span class="tag ${f.status === "open" ? "t-trial" : "t-active"}">${f.status === "open" ? "待處理" : f.status === "replied" ? "已回覆" : "已結案"}</span></div><span class="muted">${new Date(f.created_at).toLocaleString("zh-TW")}</span></div><p style="white-space:pre-wrap;line-height:1.7;margin:8px 0">${esc(f.message)}</p>${f.reply ? `<div class="muted" style="background:var(--blueb);border-radius:10px;padding:8px 10px;white-space:pre-wrap;color:var(--ink)"><b>你的回覆：</b>${esc(f.reply)}</div>` : ""}${f.status !== "closed" ? `<textarea data-fbr="${f.id}" placeholder="輸入回覆（會用 LINE 傳給老師）" style="margin-top:8px;min-height:60px"></textarea><div class="acts" style="margin-top:6px"><button class="btn s" data-fbsend="${f.id}">送出回覆</button><button class="btn o s" data-fbclose="${f.id}">結案</button></div>` : ""}</div>`).join("") : '<div class="card empty">還沒有意見回饋</div>'}`;
 }
 function annHTML() {
-  const row = (a) => `<div class="card" data-an="${a.id || ""}"><div class="row"><label class="f">標題<input data-af="title" value="${esc(a.title || "")}" placeholder="例如：新功能上線！"></label><label class="f">類型<select data-af="level"><option value="info" ${a.level !== "important" ? "selected" : ""}>一般</option><option value="important" ${a.level === "important" ? "selected" : ""}>重要（紅色）</option></select></label><label class="f">開始顯示<input data-af="starts_at" type="date" value="${a.starts_at ? new Date(a.starts_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)}"></label><label class="f">結束顯示（空白＝一直顯示）<input data-af="ends_at" type="date" value="${a.ends_at ? new Date(a.ends_at).toISOString().slice(0, 10) : ""}"></label></div><label class="f">內容<textarea data-af="body" placeholder="例如：課後才藝名單上線了，到選單就能使用…">${esc(a.body || "")}</textarea></label><div class="acts" style="margin-top:8px;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" data-af="active" ${a.active !== false ? "checked" : ""} style="width:auto"> 顯示中</label><button class="btn s" data-ansave="1">保存</button>${a.id ? `<button class="btn o s" data-annotify="${a.id}">${a.notified_at ? "再發送一次通知" : "發送通知"}</button><button class="btn o s" data-andel="${a.id}">刪除</button>` : ""}</div>${a.id ? `<div class="muted" style="margin-top:6px">${a.notified_at ? `已於 ${fdt(a.notified_at)} 發送通知（手機 ${a.notified_push || 0} 支${a.level === "important" ? `、LINE ${a.notified_line || 0} 位` : ""}）` : "還沒發送通知"}${a.release_id ? "・前台更新時自動建立" : ""}</div>` : ""}</div>`;
+  const row = (a) => `<div class="card" data-an="${a.id || ""}"><div class="row"><label class="f">標題<input data-af="title" value="${esc(a.title || "")}" placeholder="例如：新功能上線！"></label><label class="f">類型<select data-af="level"><option value="info" ${a.level !== "important" ? "selected" : ""}>一般</option><option value="important" ${a.level === "important" ? "selected" : ""}>重要（紅色）</option></select></label><label class="f">開始顯示<input data-af="starts_at" type="date" value="${a.starts_at ? ymdTW(a.starts_at) : ymdTW()}"></label><label class="f">結束顯示（空白＝一直顯示）<input data-af="ends_at" type="date" value="${a.ends_at ? ymdTW(a.ends_at) : ""}"></label></div><label class="f">內容<textarea data-af="body" placeholder="例如：課後才藝名單上線了，到選單就能使用…">${esc(a.body || "")}</textarea></label><div class="acts" style="margin-top:8px;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" data-af="active" ${a.active !== false ? "checked" : ""} style="width:auto"> 顯示中</label><button class="btn s" data-ansave="1">保存</button>${a.id ? `<button class="btn o s" data-annotify="${a.id}">${a.notified_at ? "再發送一次通知" : "發送通知"}</button><button class="btn o s" data-andel="${a.id}">刪除</button>` : ""}</div>${a.id ? `<div class="muted" style="margin-top:6px">${a.notified_at ? `已於 ${fdt(a.notified_at)} 發送通知（手機 ${a.notified_push || 0} 支${a.level === "important" ? `、LINE ${a.notified_line || 0} 位` : ""}）` : "還沒發送通知"}${a.release_id ? "・前台更新時自動建立" : ""}</div>` : ""}</div>`;
   return `<p class="muted" style="margin:0 0 8px">公告會出現在所有老師的首頁上方，老師按「知道了」後就不會再看到同一則。</p>${row({})}${AN.map(row).join("")}`;
 }
 async function applySetting(key, value, msg) { const { error } = await SB.rpc("admin_save_setting", { p_key: key, p_value: value }); if (error) return toast("失敗：" + error.message); toast(msg); load(); }
@@ -288,6 +297,7 @@ function bind() {
   document.querySelectorAll("[data-fbsend],[data-fbclose]").forEach((b) => b.onclick = async () => { const id = +(b.dataset.fbsend || b.dataset.fbclose), close = !!b.dataset.fbclose, reply = document.querySelector(`[data-fbr="${id}"]`)?.value.trim() || ""; if (!close && !reply) return toast("請輸入回覆"); const { error } = await SB.rpc("admin_reply_feedback", { p_id: id, p_reply: reply, p_close: close }); if (error) return toast("失敗：" + error.message); toast(reply ? "已回覆，老師會收到 LINE" : "已結案"); load(); });
   document.querySelectorAll("[data-ansave]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-an]"), g = (k) => box.querySelector(`[data-af="${k}"]`); const p = { title: g("title").value.trim(), body: g("body").value.trim(), level: g("level").value, active: g("active").checked, starts_at: g("starts_at").value ? new Date(g("starts_at").value + "T00:00:00+08:00").toISOString() : null, ends_at: g("ends_at").value ? new Date(g("ends_at").value + "T23:59:59+08:00").toISOString() : null }; if (box.dataset.an) p.id = +box.dataset.an; if (!p.title) return toast("請輸入標題"); const { data: aid, error } = await SB.rpc("admin_save_announcement", { p }); if (error) return toast("失敗：" + error.message); toast("公告已保存"); await load(); if (!p.id && aid) askNotify(aid); });
   document.querySelectorAll("[data-annotify]").forEach((b) => b.onclick = () => askNotify(+b.dataset.annotify));
+  document.querySelectorAll('textarea[data-af="body"]').forEach((t) => { const fit = () => { t.style.height = "auto"; t.style.height = Math.max(170, t.scrollHeight + 4) + "px"; }; fit(); t.addEventListener("input", fit); });
   document.querySelectorAll("[data-andel]").forEach((b) => b.onclick = async () => { if (!confirm("確定刪除這則公告？")) return; const { error } = await SB.rpc("admin_delete_announcement", { p_id: +b.dataset.andel }); if (error) return toast(error.message); toast("已刪除"); load(); });
   document.querySelectorAll("[data-t2]").forEach((b) => b.onclick = () => { tab = b.dataset.t2; render(); });
   const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }
@@ -338,7 +348,7 @@ function payDialog(type, id) {
   ["pPlan", "pMonths", "pSeats"].forEach((k) => $(k).addEventListener("change", guess));
 }
 function subDialog(type, id) {
-  const s = curSub(type, id) || {}, ends = s.ends_at ? new Date(s.ends_at).toISOString().slice(0, 10) : new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const s = curSub(type, id) || {}, ends = s.ends_at ? ymdTW(s.ends_at) : ymdTW(Date.now() + 30 * 864e5);
   openDlg(`<h3>方案設定・${esc(whoName(type, id))}</h3><p class="muted" style="margin:0 0 10px">直接設定方案和到期日（不會產生付款紀錄）。${type === "workspace" ? "選「跟隨建立者」就會用建立者的個人方案。" : ""}</p>
     <div class="row"><label class="f">方案<select id="sPlan"><option value="">${type === "workspace" ? "跟隨建立者" : "沒有方案"}</option>${D.plans.map((p) => `<option value="${esc(p.id)}" ${p.id === s.plan_id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label><label class="f">狀態<select id="sStatus"><option value="active" ${s.status !== "trial" ? "selected" : ""}>付費使用中</option><option value="trial" ${s.status === "trial" ? "selected" : ""}>體驗中</option></select></label></div>
     <div class="row"><label class="f">到期日<input id="sEnds" type="date" value="${ends}"></label><label class="f">老師人數（空白＝方案預設）<input id="sSeats" type="number" min="1" value="${s.seats ?? ""}"></label></div><label class="f">備註<input id="sNote" value="${esc(s.note || "")}"></label>`, async () => {

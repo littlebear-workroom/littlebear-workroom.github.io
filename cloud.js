@@ -801,7 +801,7 @@
     lastList = list;
     const saved = meta().ws, pickWs = list.find((w) => w.status !== "pending" && saved && w.id === saved.id) || (list.filter((w) => w.status !== "pending").length === 1 ? list.find((w) => w.status !== "pending") : null);
     ws = pickWs; const m = meta(); m.ws = ws ? { id: ws.id, name: ws.name } : null; saveMeta(m);
-    await Promise.all([loadAccess(), pull({ reloadIfChanged: false }), sb.rpc("plan_catalog").then(({ data }) => { catalog = data; }, () => {})]);
+    await Promise.all([loadAccess(), pull({ reloadIfChanged: false }), sb.rpc("plan_catalog").then(({ data }) => { catalog = data; window.bearAICosts = data && data.ai_costs; setTimeout(() => window.dispatchEvent(new Event("bear-costs")), 0); }, () => {})]);
     await flushDirty();
   }
   async function boot() {

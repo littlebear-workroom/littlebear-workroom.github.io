@@ -639,7 +639,7 @@
       <div class="plan-meter"><div class="plan-meter-head"><span>${far ? "長期有效" : isRO() ? `已在 ${fmtD(access.ends_at)} 到期` : `還有 <b>${left}</b> 天`}</span><small>${far ? "" : `到期日 ${fmtD(access.ends_at)}`}</small></div><div class="plan-track"><i style="width:0%" data-w="${pct}"></i><span class="plan-bear" style="left:0%" data-l="${pct}"></span></div></div>
       <div class="plan-meter"><div class="plan-meter-head"><span>AI 點數還有 <b>${access.ai_left}</b> 點</span><small>每月 ${access.ai_total} 點${access.ai_bonus ? `・加購剩 ${access.ai_bonus}` : ""}</small></div><div class="plan-track ai"><i style="width:0%" data-w="${aiPct}"></i></div></div>
       ${access.subject === "workspace" || ws ? `<p class="small-note" style="margin:6px 0 0">${ws ? `班級「${escH(ws.name)}」` : ""}${access.seats ? `・老師 ${access.members || 1}／${access.seats} 位` : ""}</p>` : ""}
-      <div class="rt-actions" style="margin-top:10px"><button type="button" class="outline-btn" id="planOpen">${isRO() || access.state === "trial" ? "查看方案與付款" : "方案與加購點數"}</button>${catalog && catalog.is_admin ? `<a class="outline-btn" href="/admin.html">管理後台</a>` : ""}</div>`;
+      <div class="rt-actions" style="margin-top:10px"><button type="button" class="outline-btn" id="planOpen">${isRO() || access.state === "trial" ? "查看方案與付款" : "方案與加購點數"}</button></div>`;
     card.querySelector("#planOpen").onclick = () => openPlans();
     requestAnimationFrame(() => setTimeout(() => card.querySelectorAll("[data-w]").forEach((el) => el.style.width = el.dataset.w + "%"), 60));
     requestAnimationFrame(() => setTimeout(() => card.querySelectorAll("[data-l]").forEach((el) => el.style.left = `calc(${el.dataset.l}% - 12px)`), 60));

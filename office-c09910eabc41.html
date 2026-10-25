@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<title>小熊工作室後台</title>
+<title>小熊工作室</title>
 <link rel="icon" type="image/png" href="/icon-192.png">
 <style>
 :root{--bg:#fbf6f0;--paper:#fffdf9;--ink:#554943;--muted:#9a8980;--line:#eee3da;--rose:#bd8582;--rose2:#a66f72;--sage:#728369;--sageb:#edf2e9;--warn:#a2660f;--warnb:#fbe9cc;--bad:#b23b40;--badb:#fde2e1;--blue:#4f6f97;--blueb:#eef3f9}
@@ -30,7 +30,7 @@ dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24
 </head>
 <body>
 <div class="wrap">
-<header><img src="/icon-192.png" alt=""><div><h1>小熊工作室後台</h1><small>只顯示帳號、方案、用量與付款，不顯示任何學生資料</small></div><span class="sp"></span><a class="btn o s" href="/">回到 App</a></header>
+<header id="head" hidden><img src="/icon-192.png" alt=""><div><h1>小熊工作室後台</h1><small>只顯示帳號、方案、用量與付款，不顯示任何學生資料</small></div><span class="sp"></span><button class="btn o s" id="logout">登出後台</button></header>
 <div id="gate" class="card empty">載入中…</div>
 <div id="app" hidden>
 <nav class="tabs" id="tabs"></nav>
@@ -176,12 +176,45 @@ function ptsDialog(type, id) {
     toast("點數已更新"); load();
   });
 }
-(async () => {
-  const { data } = await SB.auth.getSession();
-  if (!data.session) { $("gate").innerHTML = `請先到 <a href="/">小熊工作室</a> 用 LINE 登入，再回來這一頁。`; return; }
+// ---- LINE sign-in on this page (only admins ever see anything) ----
+const LIFF_ID = "2012187193-uL27Ayag";
+const notFound = () => { document.title = "404"; $("gate").innerHTML = '<div style="font-size:42px;font-weight:800;color:#c9b6a9">404</div><p>找不到這個頁面</p>'; };
+async function liffReady() {
+  if (!window.liff) await new Promise((res, rej) => { const s = document.createElement("script"); s.src = "https://static.line-scdn.net/liff/edge/2/sdk.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  await liff.init({ liffId: LIFF_ID });
+}
+function tokenStale() { try { const d = liff.getDecodedIDToken(); return !d || !d.exp || d.exp * 1000 < Date.now() + 60e3; } catch { return true; } }
+async function lineSignIn() {
+  $("gate").innerHTML = "正在連到 LINE…";
+  await liffReady();
+  if (liff.isLoggedIn() && tokenStale()) { try { liff.logout(); } catch {} }
+  if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.origin + location.pathname }); return false; }
+  const r = await fetch("https://cwsxlfifpydxmmjsiwzg.supabase.co/functions/v1/line-auth", { method: "POST", headers: { "Content-Type": "application/json", apikey: "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7" }, body: JSON.stringify({ idToken: liff.getIDToken() }) });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok || !b.token_hash) throw new Error(b.error || "LINE 登入失敗");
+  const { error } = await SB.auth.verifyOtp({ token_hash: b.token_hash, type: "magiclink" });
+  if (error) throw error;
+  history.replaceState(null, "", location.pathname);
+  return true;
+}
+async function enter() {
   const { data: ok } = await SB.rpc("is_admin");
-  if (!ok) { $("gate").innerHTML = "這個帳號沒有後台權限。"; return; }
-  $("gate").hidden = true; $("app").hidden = false; load();
+  if (!ok) return notFound();
+  $("gate").hidden = true; $("head").hidden = false; $("app").hidden = false; load();
+}
+$("logout").onclick = async () => { await SB.auth.signOut(); try { if (window.liff && liff.isLoggedIn()) liff.logout(); } catch {} location.replace(location.pathname); };
+(async () => {
+  try {
+    const back = /[?&](code|liffClientId|liff\.state)=/.test(location.search);
+    let { data } = await SB.auth.getSession();
+    if (!data.session && back) { if (await lineSignIn()) ({ data } = await SB.auth.getSession()); else return; }
+    if (!data.session) {
+      $("gate").innerHTML = '<p style="margin:0 0 14px">請先登入</p><button class="btn" id="lineBtn" style="background:#06C755">使用 LINE 登入</button>';
+      $("lineBtn").onclick = () => lineSignIn().then((ok) => ok && enter()).catch((e) => { $("gate").textContent = "登入失敗：" + (e.message || e); });
+      return;
+    }
+    await enter();
+  } catch (e) { $("gate").textContent = "登入失敗：" + (e.message || e); }
 })();
 </script>
 </body>

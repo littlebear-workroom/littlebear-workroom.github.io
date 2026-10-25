@@ -125,8 +125,7 @@ create or replace function public.plan_catalog() returns jsonb language sql stab
     'topups', (select value from app_settings where key = 'topups'),
     'ai_costs', (select value from app_settings where key = 'ai_costs'),
     'pay_note', (select value from app_settings where key = 'pay_note'),
-    'trial', (select value from app_settings where key = 'trial'),
-    'is_admin', public.is_admin());
+    'trial', (select value from app_settings where key = 'trial'));
 $$;
 
 revoke all on function public.is_admin(), public.admin_guard(), public.admin_overview(), public.admin_set_sub(text, uuid, text, text, timestamptz, int, text), public.admin_add_points(text, uuid, int, text),

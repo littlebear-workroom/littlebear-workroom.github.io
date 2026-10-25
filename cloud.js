@@ -733,13 +733,13 @@
   const FB_CAT = { question: "使用問題", bug: "回報錯誤", idea: "許願／建議", billing: "付款與方案", other: "其他" };
   async function renderFeedback() {
     let card = document.getElementById("fbCard");
-    const after = document.getElementById("appCardLogin") || document.getElementById("cloudAccount");
-    if (!user || !after) { if (card) card.hidden = true; return; }
-    if (!card) { card = document.createElement("div"); card.id = "fbCard"; card.className = "lesson-card"; after.after(card); }
+    const slot = document.getElementById("fbSlot");
+    if (!user || !slot) { if (card) card.hidden = true; return; }
+    if (!card) { card = document.createElement("div"); card.id = "fbCard"; card.className = "lesson-card"; slot.appendChild(card); }
     card.hidden = false;
     let mine = []; try { const { data } = await sb.rpc("my_feedback"); mine = data || []; } catch {}
-    card.innerHTML = `<div class="lesson-top"><div class="lesson-icon"><span class=illus-note aria-hidden=true></span></div><div><h4>意見回饋</h4><p>使用上有問題、發現錯誤，或想要新功能，都可以跟我們說，回覆會傳到你的 LINE。</p></div></div>
-      <div class="field" style="margin-top:12px"><label>類型</label><select id="fbCat">${Object.entries(FB_CAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
+    card.innerHTML = `<p class="small-note" style="margin:0 0 4px">回覆會傳到你的 LINE。</p>
+      <div class="field" style="margin-top:8px"><label>類型</label><select id="fbCat">${Object.entries(FB_CAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
       <div class="field"><label>想說的話</label><textarea id="fbMsg" rows="3" maxlength="2000" placeholder="例如：上傳班表時讀錯了某一格、希望可以多一個○○功能…（請不要寫學生的個資）"></textarea></div>
       <button type="button" class="primary" id="fbSend">送出</button>
       ${mine.length ? `<div class="small-note" style="margin:14px 2px 6px;font-weight:700">我送出的意見</div>${mine.map((f) => `<div class="fb-item"><div class="fb-top"><span class="tag">${escH(FB_CAT[f.category] || f.category)}</span><small>${fmtD(f.created_at)}</small><span class="plan-state ${f.status === "open" ? "trial" : "active"}">${f.status === "open" ? "處理中" : f.status === "replied" ? "已回覆" : "已結案"}</span></div><p>${escH(f.message)}</p>${f.reply ? `<div class="fb-reply"><b>小熊工作室回覆：</b>${escH(f.reply)}</div>` : ""}</div>`).join("")}` : ""}`;
@@ -753,9 +753,9 @@
   // ---------- my account: export / delete ----------
   function renderAccountCard() {
     let card = document.getElementById("acctCard");
-    const after = document.getElementById("fbCard") || document.getElementById("cloudAccount");
-    if (!user || !after) { if (card) card.hidden = true; return; }
-    if (!card) { card = document.createElement("div"); card.id = "acctCard"; card.className = "lesson-card"; after.after(card); }
+    const slot = document.getElementById("acctSlot");
+    if (!user || !slot) { if (card) card.hidden = true; return; }
+    if (!card) { card = document.createElement("div"); card.id = "acctCard"; card.className = "lesson-card"; slot.appendChild(card); }
     card.hidden = false;
     card.innerHTML = `<div class="lesson-top"><div class="lesson-icon"><span class=illus-safety aria-hidden=true></span></div><div><h4>帳號與資料</h4><p>你的資料只存在雲端。可以隨時下載一份自己的資料，或刪除帳號。</p></div></div>
       <div class="rt-actions" style="margin-top:12px"><button type="button" class="outline-btn" id="acctExport">下載我的資料</button><button type="button" class="outline-btn" id="acctDel" style="color:#b0534f">刪除帳號</button></div>

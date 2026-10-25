@@ -47,6 +47,10 @@
   let guest = !rawGet.call(LS, "bear_cloud_auth");
   Storage.prototype.setItem = function (k, v) {
     if (this === LS && isData(k)) {
+      if (!muted && user && !guest && isRO() && (SHARED.includes(k) || PERSONAL.includes(k)) && !["bear_notify_prefs", "bear_profile"].includes(k)) {
+        if (!roWarned) { roWarned = true; setTimeout(() => { roWarned = false; }, 4000); toast("方案已到期，目前是唯讀模式，修改不會儲存。續約後就能繼續使用"); }
+        return;
+      }
       MEM.set(k, String(v));
       if (!muted && user && !guest && (SHARED.includes(k) || PERSONAL.includes(k))) queuePush(k);
       return;
@@ -108,11 +112,10 @@
     try {
       const value = readLocal(k);
       if (value === undefined) return;
-      if (PERSONAL.includes(k)) {
+      if (PERSONAL.includes(k) || !ws) { // not in a class yet: class data is kept in the teacher's own cloud space
         const { error } = await sb.from("personal_data").upsert({ user_id: user.id, key: k, value, updated_at: new Date().toISOString() });
         if (error) throw error;
       } else {
-        if (!ws) return; // not in a class yet: stays on this device
         const m = meta(), vers = m.vers || {}, bases = m.bases || {};
         let attempt = 0, toSave = value;
         while (attempt++ < 4) {
@@ -142,7 +145,7 @@
     const { data: pd, error: pe } = await sb.from("personal_data").select("key,value");
     if (pe) throw pe;
     const cloudP = new Map((pd || []).map((r) => [r.key, r.value]));
-    for (const k of PERSONAL) {
+    for (const k of ws ? PERSONAL : [...PERSONAL, ...SHARED]) {
       if (cloudP.has(k)) { if (!same(readLocal(k), cloudP.get(k))) { writeLocal(k, cloudP.get(k)); changed = true; } }
       else if (readLocal(k) !== undefined) queuePush(k); // first sign-in: upload what this device has
     }
@@ -208,9 +211,12 @@
     return (data || []).filter((r) => r.workspaces).map((r) => ({ ...r.workspaces, role: r.role, status: r.status || "active", invite_code: r.status === "pending" ? "" : r.workspaces.invite_code }));
   }
   async function chooseWorkspace(w, { upload = false } = {}) {
+    // Leaving or switching classes: never carry one class's data (student names…) into another space.
+    if (ws && (!w || w.id !== ws.id) && !upload) SHARED.forEach((k) => MEM.delete(k));
     ws = w || null;
     const m = meta(); m.ws = ws ? { id: ws.id, name: ws.name } : null; if (upload && ws) m.uploadLocalTo = ws.id; saveMeta(m);
     subscribe();
+    await loadAccess(); applyAccess();
     if (ws) { const changed = await pull({ reloadIfChanged: false }); if (upload) for (const k of SHARED) if (readLocal(k) !== undefined) await push(k); if (changed) reloadApp(); }
     renderCloudUI();
     renderAppCards();
@@ -362,6 +368,7 @@
     baseSwitch = window.switchView;
     window.switchView = function (v) {
       if (guest && !OPEN_VIEWS.includes(v)) { toast("請先用 LINE 登入，登入後就能使用這個功能"); return baseSwitch("login"); }
+      const f = FEATURE_OF_VIEW[v]; if (f && access && access.state !== "guest" && !hasFeature(f)) { toast(`目前的方案沒有包含「${FEATURE_NAMES[f]}」，可以看看其他方案`); return openPlans(); }
       return baseSwitch(v);
     };
     const css = document.createElement("style");
@@ -414,7 +421,7 @@
         return `${pend.length && isOwner ? `<div class="motor-warn" style="margin:10px 0 4px"><b>有 ${pend.length} 位老師申請加入</b>，核准後對方才看得到班級資料（包含學生個資）。請確認是同班老師再核准。${pend.map((m) => `<div class="cloud-pend"><span>${escH(m.profiles?.display_name || "老師")}</span><button type="button" class="outline-btn" data-approve="${m.user_id}">核准</button><button type="button" class="outline-btn" data-reject="${m.user_id}">拒絕</button></div>`).join("")}</div>` : ""}<div class="small-note" style="margin:10px 0 4px">班級成員（${act.length}）</div><div class="fm-chips">${act.map((m) => `<span class="tag ${m.role === "owner" ? "" : "green"}">${escH(m.profiles?.display_name || "老師")}${m.role === "owner" ? " · 建立者" : ""}${isOwner && m.role !== "owner" ? ` <button type="button" class="cloud-x" data-reject="${m.user_id}" aria-label="移出班級">×</button>` : ""}</span>`).join("")}</div>`; })()}` : ""}
       ${ls.filter((w) => w.status === "pending").map((w) => `<div class="motor-warn" style="margin-top:10px">已申請加入「${escH(w.name)}」，等班級建立者核准中。核准後重新打開 App 就能看到班級資料。</div>`).join("")}
       <div id="cloudLeaveConfirm" class="motor-warn" hidden></div>`;
-    team.querySelectorAll("[data-approve]").forEach((b) => b.onclick = async () => { const { error } = await sb.rpc("approve_member", { p_ws: ws.id, p_user: b.dataset.approve }); if (error) return toast("核准失敗：" + error.message); toast("已核准，對方重新打開 App 就能看到班級資料"); renderCloudUI(); });
+    team.querySelectorAll("[data-approve]").forEach((b) => b.onclick = async () => { const { error } = await sb.rpc("approve_member", { p_ws: ws.id, p_user: b.dataset.approve }); if (error) return toast(/seats_full/.test(error.message) ? `班級人數已滿（${access?.seats || 3} 位老師），需要增加人數請聯絡管理者開通` : /plan_no_team/.test(error.message) ? "目前的方案不包含班級共享" : /plan_readonly/.test(error.message) ? "方案已到期，續約後才能核准新成員" : "核准失敗：" + error.message); toast("已核准，對方重新打開 App 就能看到班級資料"); renderCloudUI(); });
     team.querySelectorAll("[data-reject]").forEach((b) => b.onclick = async () => { if (!confirm("確定要把這位老師移出班級嗎？對方將看不到班級資料。")) return; const { error } = await sb.from("workspace_members").delete().eq("workspace_id", ws.id).eq("user_id", b.dataset.reject); if (error) return toast("移除失敗：" + error.message); toast("已移出班級"); renderCloudUI(); });
     const sel = document.getElementById("cloudWsSel");
     if (sel) sel.onchange = () => chooseWorkspace(ls.find((w) => w.id === sel.value) || null);
@@ -436,7 +443,7 @@
     const name = (document.getElementById("teamName")?.value || "").trim();
     if (!name) { toast("請先輸入班級名稱"); return; }
     const { data, error } = await sb.rpc("create_workspace", { p_name: name });
-    if (error) return toast("建立失敗：" + error.message);
+    if (error) return toast(/plan_no_team/.test(error.message) ? "目前的方案不包含「班級共享」，升級成班級協作版就能邀請同班老師" : /plan_readonly/.test(error.message) ? "方案已到期，續約後才能建立班級" : "建立失敗：" + error.message);
     lastList = await loadWorkspaces();
     await chooseWorkspace(lastList.find((w) => w.id === data.id), { upload: true });
     toast(`已建立「${escH(name)}」，邀請碼：${data.invite_code}`);
@@ -477,9 +484,10 @@
     const images = sources.slice(0, 4).map(toJpeg);
     (say || (() => {}))("AI 正在讀圖，大約需要 20～60 秒，請稍等…");
     const { data } = await sb.auth.getSession();
-    const res = await fetch(CFG.supabaseUrl + "/functions/v1/ai-read", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ kind, images, context }) });
+    const res = await fetch(CFG.supabaseUrl + "/functions/v1/ai-read", { method: "POST", headers: { "Content-Type": "application/json", apikey: CFG.supabaseKey, Authorization: "Bearer " + data.session.access_token }, body: JSON.stringify({ kind, images, context, ws: ws ? ws.id : null }) });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.ok) throw new Error(body.error || "AI 讀圖失敗");
+    if (!res.ok || !body.ok) { if (res.status === 402) setTimeout(() => toast(body.error), 50); throw new Error(body.error || "AI 讀圖失敗"); }
+    if (body.points && access) { access.ai_left = body.points.left; renderPlanCard(); }
     (say || (() => {}))("AI 讀完了，請檢查下面的內容");
     return body.data;
   }
@@ -598,12 +606,69 @@
   }
 
   // ---------- boot ----------
+  // ---------- plan / subscription ----------
+  let access = null, catalog = null, roWarned = false;
+  const FEATURE_OF_VIEW = { funds: "funds", supplies: "supplies", forms: "forms", students: "students", roster: "roster", routine: "routine", chores: "chores", tasks: "tasks", schedule: "schedule", lessons: "lessons", motor: "motor", training: "training", calendar: "calendar", afterschool: "afterschool", bus: "bus", files: "indicators", team: "team" };
+  const FEATURE_NAMES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", team: "班級共享（多位老師）", ai: "AI 小幫手" };
+  const isRO = () => !!(access && access.state === "readonly");
+  const hasFeature = (f) => !access || access.state === "guest" || !access.features || access.features[f] !== false && (access.features[f] === true || access.features[f] === undefined);
+  async function loadAccess() { if (!sb || !user) return null; try { const { data, error } = await sb.rpc("my_access", { p_ws: ws ? ws.id : null }); if (!error) access = data; } catch (e) { console.warn(e); } window.bearAccess = access; return access; }
+  function daysLeft(iso) { return Math.ceil((new Date(iso) - Date.now()) / 864e5); }
+  function applyAccess() {
+    document.body.classList.toggle("readonly", isRO());
+    document.querySelectorAll(".menu-tile[data-goto]").forEach((t) => { const f = FEATURE_OF_VIEW[t.dataset.goto]; t.classList.toggle("plan-locked", !!(f && access && access.state !== "guest" && !hasFeature(f))); });
+    let bar = document.getElementById("planBanner");
+    const home = document.getElementById("view-home");
+    const msg = !access || access.state === "guest" ? "" : isRO() ? `方案已在 ${fmtD(access.ends_at)} 到期，目前是<b>唯讀</b>：可以查看、匯出，不能新增或修改。` : access.state === "trial" && daysLeft(access.ends_at) <= 3 ? `免費體驗還剩 <b>${Math.max(0, daysLeft(access.ends_at))} 天</b>，到期後會變成唯讀。` : daysLeft(access.ends_at) <= 7 ? `方案還剩 <b>${Math.max(0, daysLeft(access.ends_at))} 天</b>到期，記得續約喔。` : "";
+    if (home && msg) { if (!bar) { bar = document.createElement("div"); bar.id = "planBanner"; bar.className = "motor-warn plan-banner"; const hello = home.querySelector(".hello"); (hello || home.firstChild).after(bar); } bar.innerHTML = `${msg} <button type="button" class="link-btn">查看方案</button>`; bar.querySelector("button").onclick = () => openPlans(); bar.hidden = false; }
+    else if (bar) bar.hidden = true;
+    renderPlanCard();
+  }
+  const fmtD = (iso) => { const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
+  function renderPlanCard() {
+    const anchor = document.getElementById("cloudAccount"); if (!anchor) return;
+    let card = document.getElementById("planCard");
+    if (!user || !access || access.state === "guest" || access.state === "none") { if (card) card.hidden = true; return; }
+    if (!card) { card = document.createElement("div"); card.id = "planCard"; card.className = "plan-card"; anchor.after(card); }
+    card.hidden = false;
+    const total = Math.max(1, (new Date(access.ends_at) - new Date(access.starts_at)) / 864e5), left = daysLeft(access.ends_at), far = left > 3650;
+    const pct = far ? 100 : Math.max(0, Math.min(100, (left / total) * 100));
+    const aiCap = Math.max(1, (access.ai_total || 0) + (access.ai_bonus || 0)), aiPct = Math.max(0, Math.min(100, (access.ai_left / aiCap) * 100));
+    const label = isRO() ? "已到期・唯讀" : access.state === "trial" ? "免費體驗中" : "使用中";
+    card.innerHTML = `<div class="plan-top"><div><small>目前方案</small><b>${escH(access.plan)}</b></div><span class="plan-state ${isRO() ? "ro" : access.state}">${label}</span></div>
+      <div class="plan-meter"><div class="plan-meter-head"><span>${far ? "長期有效" : isRO() ? `已在 ${fmtD(access.ends_at)} 到期` : `還有 <b>${left}</b> 天`}</span><small>${far ? "" : `到期日 ${fmtD(access.ends_at)}`}</small></div><div class="plan-track"><i style="width:0%" data-w="${pct}"></i><span class="plan-bear" style="left:0%" data-l="${pct}"></span></div></div>
+      <div class="plan-meter"><div class="plan-meter-head"><span>AI 點數還有 <b>${access.ai_left}</b> 點</span><small>每月 ${access.ai_total} 點${access.ai_bonus ? `・加購剩 ${access.ai_bonus}` : ""}</small></div><div class="plan-track ai"><i style="width:0%" data-w="${aiPct}"></i></div></div>
+      ${access.subject === "workspace" || ws ? `<p class="small-note" style="margin:6px 0 0">${ws ? `班級「${escH(ws.name)}」` : ""}${access.seats ? `・老師 ${access.members || 1}／${access.seats} 位` : ""}</p>` : ""}
+      <div class="rt-actions" style="margin-top:10px"><button type="button" class="outline-btn" id="planOpen">${isRO() || access.state === "trial" ? "查看方案與付款" : "方案與加購點數"}</button>${catalog && catalog.is_admin ? `<a class="outline-btn" href="/admin.html">管理後台</a>` : ""}</div>`;
+    card.querySelector("#planOpen").onclick = () => openPlans();
+    requestAnimationFrame(() => setTimeout(() => card.querySelectorAll("[data-w]").forEach((el) => el.style.width = el.dataset.w + "%"), 60));
+    requestAnimationFrame(() => setTimeout(() => card.querySelectorAll("[data-l]").forEach((el) => el.style.left = `calc(${el.dataset.l}% - 12px)`), 60));
+  }
+  async function openPlans() {
+    let view = document.getElementById("view-plans");
+    if (!view) {
+      view = document.createElement("section"); view.className = "view"; view.id = "view-plans";
+      const anyView = document.querySelector("section.view"); anyView.parentNode.insertBefore(view, anyView);
+    }
+    if (!catalog) { try { const { data } = await sb.rpc("plan_catalog"); catalog = data; } catch {} }
+    const c = catalog || { plans: [], topups: [] }, costs = c.ai_costs || {};
+    const COST_NAMES = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
+    view.innerHTML = `<h2 class="page-title">方案與續約 <span class=illus-star aria-hidden=true></span></h2><p class="page-sub">${access ? `目前方案：<b>${escH(access.plan || "")}</b>${access.ends_at ? `・${isRO() ? "已到期" : "到期日 " + fmtD(access.ends_at)}` : ""}` : ""}</p>
+      ${c.plans.map((p) => `<article class="lesson-card plan-offer ${access && access.plan_id === p.id ? "current" : ""}"><div class="plan-offer-top"><div><h4>${escH(p.name)}</h4><p>${escH(p.description || "")}</p></div>${access && access.plan_id === p.id ? '<span class="plan-state active">目前方案</span>' : ""}</div>
+        <div class="plan-price"><b>NT$${p.price_month}</b><small>／月</small>${p.price_year ? `<span>年繳 NT$${p.price_year.toLocaleString()}（省 NT$${(p.price_month * 12 - p.price_year).toLocaleString()}）</span>` : ""}</div>
+        <ul class="plan-feat"><li>老師人數：${p.seats} 位${p.extra_seat_price ? `（第 ${p.seats + 1} 位起 NT$${p.extra_seat_price}／人／月）` : ""}</li><li>每月 AI 點數：${p.ai_points} 點</li>${Object.entries(FEATURE_NAMES).filter(([k]) => k !== "ai").map(([k, n]) => `<li class="${p.features && p.features[k] ? "" : "no"}">${n}</li>`).join("")}</ul></article>`).join("")}
+      ${(c.topups || []).length ? `<div class="section-head" style="margin-top:6px"><h3>AI 點數加購</h3></div><div class="plan-topups">${c.topups.map((t) => `<div class="plan-topup"><b>${escH(t.name || "")}</b><span>${t.points} 點</span><strong>NT$${t.price}</strong></div>`).join("")}</div><p class="small-note" style="margin:6px 2px 0">加購的點數不會過期，用完每月點數後才會扣。</p>` : ""}
+      ${Object.keys(costs).length ? `<div class="lesson-card" style="margin-top:12px"><h4 style="margin:0 0 6px">每種 AI 工作扣幾點</h4>${Object.entries(costs).map(([k, v]) => `<div class="plan-cost"><span>${COST_NAMES[k] || k}</span><b>${v} 點</b></div>`).join("")}</div>` : ""}
+      <div class="lesson-card" style="margin-top:12px"><h4 style="margin:0 0 6px">怎麼付款</h4><p class="small-note" style="line-height:1.8;white-space:pre-wrap;margin:0">${escH(typeof c.pay_note === "string" ? c.pay_note : "")}</p><p class="small-note" style="margin:8px 0 0">付款時請備註你的 LINE 名稱「${escH(user?.user_metadata?.name || "")}」${ws ? `和班級「${escH(ws.name)}」` : ""}，方便核對。</p></div>`;
+    window.switchView && baseSwitch ? baseSwitch("plans") : window.switchView && switchView("plans");
+  }
+
   async function preload() {
     const list = await loadWorkspaces();
     lastList = list;
     const saved = meta().ws, pickWs = list.find((w) => w.status !== "pending" && saved && w.id === saved.id) || (list.filter((w) => w.status !== "pending").length === 1 ? list.find((w) => w.status !== "pending") : null);
     ws = pickWs; const m = meta(); m.ws = ws ? { id: ws.id, name: ws.name } : null; saveMeta(m);
-    await pull({ reloadIfChanged: false });
+    await Promise.all([loadAccess(), pull({ reloadIfChanged: false }), sb.rpc("plan_catalog").then(({ data }) => { catalog = data; }, () => {})]);
     await flushDirty();
   }
   async function boot() {
@@ -617,7 +682,7 @@
     else wipeLegacy();
     startApp();
     const css = document.createElement("style");
-    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.app-steps{margin:8px 0 4px;padding-left:20px;font-size:12px;line-height:1.9;color:#6e5d54}.app-ok{color:#728369!important;margin:10px 0 6px!important;line-height:1.7}#appCard .rt-actions,#appCardLogin .rt-actions{margin-top:8px}.cloud-pend{display:flex;align-items:center;gap:8px;margin-top:8px}.cloud-pend span{flex:1;font-weight:700}.cloud-pend .outline-btn{padding:6px 12px}.cloud-x{background:transparent;color:inherit;padding:0 0 0 4px;font-size:13px}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
+    css.textContent = `.cloud-me{display:flex;align-items:center;gap:10px}.cloud-me img{border-radius:50%;object-fit:cover}.cloud-me b{display:block;font-size:14px;color:#5d4b44}.cloud-me small{font-size:11px;color:#9a8980}.cloud-code{background:#f6e9e5;border-radius:13px;padding:13px;margin:10px 0}.cloud-code small{display:block;font-size:11px;color:#9a8980}.cloud-code b{display:block;font-size:25px;letter-spacing:4px;font-weight:800;color:#a66f72;margin:6px 0}.cloud-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;gap:10px;align-items:center;background:#61524b;color:#fff;border-radius:16px;padding:10px 12px 10px 16px;font-size:12px;box-shadow:0 8px 25px #49372d33;max-width:calc(100% - 32px)}.app-steps{margin:8px 0 4px;padding-left:20px;font-size:12px;line-height:1.9;color:#6e5d54}.app-ok{color:#728369!important;margin:10px 0 6px!important;line-height:1.7}#appCard .rt-actions,#appCardLogin .rt-actions{margin-top:8px}.cloud-pend{display:flex;align-items:center;gap:8px;margin-top:8px}.cloud-pend span{flex:1;font-weight:700}.cloud-pend .outline-btn{padding:6px 12px}.cloud-x{background:transparent;color:inherit;padding:0 0 0 4px;font-size:13px}.plan-card{background:linear-gradient(135deg,#fbefec,#fff8ef);border:1px solid #f0dcd6;border-radius:18px;padding:14px;margin-top:12px}.plan-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.plan-top small{display:block;font-size:11px;color:#9a8980}.plan-top b{font-size:17px;color:#5d4b44}.plan-state{font-size:11px;font-weight:700;border-radius:999px;padding:4px 10px;white-space:nowrap;background:#e7efe1;color:#5f7552}.plan-state.trial{background:#fbe9cc;color:#a2660f}.plan-state.ro{background:#fde2e1;color:#b23b40}.plan-meter{margin-top:12px}.plan-meter-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12.5px;color:#6e5d54}.plan-meter-head b{font-size:16px;color:#a66f72}.plan-meter-head small{font-size:10.5px;color:#9a8980}.plan-track{position:relative;height:12px;border-radius:999px;background:#f1e4dc;margin-top:7px;overflow:visible}.plan-track i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:linear-gradient(90deg,#e8c4b7,#d6a5a2);transition:width 1.4s cubic-bezier(.2,.8,.2,1)}.plan-track.ai i{background:linear-gradient(90deg,#c9bde3,#9e8fc9)}.plan-bear{position:absolute;top:-9px;width:26px;height:26px;border-radius:50%;background:#fffdf9 url(/icon-192.png) center/cover;box-shadow:0 2px 6px #82645133;transition:left 1.4s cubic-bezier(.2,.8,.2,1);animation:planbob 2.4s ease-in-out infinite}@keyframes planbob{50%{transform:translateY(-3px)}}body.readonly #fab{display:none!important}.plan-banner{margin:12px 0 0}.menu-tile.plan-locked{opacity:.55;position:relative}.menu-tile.plan-locked::after{content:"方案未包含";position:absolute;top:8px;right:10px;font-size:9px;color:#8d786d;background:#f1e4dc;border-radius:999px;padding:2px 7px}.plan-offer.current{border:2px solid #d6a5a2}.plan-offer-top{display:flex;justify-content:space-between;gap:8px}.plan-offer h4{margin:0;font-size:16px;color:#5d4b44}.plan-offer p{margin:4px 0 0;font-size:12px;color:#8d786d}.plan-price{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:10px 0}.plan-price b{font-size:26px;color:#a66f72}.plan-price small{color:#9a8980}.plan-price span{font-size:11.5px;color:#728369;background:#edf2e9;border-radius:999px;padding:3px 9px}.plan-feat{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12px;color:#6e5d54}.plan-feat li::before{content:"✓ ";color:#728369;font-weight:700}.plan-feat li.no{color:#b8a9a0;text-decoration:line-through}.plan-feat li.no::before{content:"✕ ";color:#c9b6a9}.plan-feat li:nth-child(-n+2){grid-column:1/-1;font-weight:700}.plan-topups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.plan-topup{background:var(--paper);border:1px solid #f0e5dc;border-radius:14px;padding:10px 6px;text-align:center;display:grid;gap:2px}.plan-topup b{font-size:11.5px;color:#8d786d}.plan-topup span{font-size:15px;font-weight:800;color:#5d4b44}.plan-topup strong{font-size:13px;color:#a66f72}.plan-cost{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px dashed #f0e5dc;color:#6e5d54}.cloud-bar button{background:#fff;color:#61524b;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}`;
     document.head.appendChild(css);
     installGuestUI();
     window.startLineLogin = startLogin;
@@ -651,7 +716,7 @@
     }
     setGuest(!user);
     if (user) {
-      subscribe(); renderCloudUI(lastList); renderAppCards(); renderPairCodeBox();
+      subscribe(); renderCloudUI(lastList); renderAppCards(); renderPairCodeBox(); applyAccess();
       if (loadFailed) setStatus("連不到雲端，現在看到的不是最新資料，修改也還沒存到雲端；連上網路後會自動重試"); else wipeLegacy();
     }
     else {

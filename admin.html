@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>小熊工作室後台</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<style>
+:root{--bg:#fbf6f0;--paper:#fffdf9;--ink:#554943;--muted:#9a8980;--line:#eee3da;--rose:#bd8582;--rose2:#a66f72;--sage:#728369;--sageb:#edf2e9;--warn:#a2660f;--warnb:#fbe9cc;--bad:#b23b40;--badb:#fde2e1;--blue:#4f6f97;--blueb:#eef3f9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif;font-size:14px}
+button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer;border:0}
+.wrap{max-width:1100px;margin:auto;padding:18px max(16px,env(safe-area-inset-left,0px)) 60px max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;align-items:center;gap:12px;margin-bottom:14px}header img{width:42px;height:42px;border-radius:12px}header h1{font-size:19px;margin:0}header small{display:block;color:var(--muted);font-size:11px}header .sp{flex:1}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px}.tabs button{background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:8px 14px;white-space:nowrap;color:#8d786d}.tabs button.on{background:#695650;border-color:#695650;color:#fff}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stat{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:12px}.stat small{color:var(--muted);font-size:11px}.stat b{display:block;font-size:24px;margin-top:4px;color:#5d4b44}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap}.t-active{background:var(--sageb);color:var(--sage)}.t-trial{background:var(--warnb);color:var(--warn)}.t-ro{background:var(--badb);color:var(--bad)}.t-none{background:#f1e4dc;color:#8d786d}.t-admin{background:var(--blueb);color:var(--blue)}
+.btn{background:var(--rose);color:#fff;border-radius:10px;padding:8px 12px;font-weight:700}.btn.o{background:var(--paper);color:var(--rose2);border:1px solid #e3c4c0}.btn.s{padding:5px 9px;font-size:12px}.btn:disabled{opacity:.5}
+.acts{display:flex;flex-wrap:wrap;gap:5px}
+input,select,textarea{border:1px solid #eadbd1;border-radius:10px;background:#fffdf9;padding:8px 10px;width:100%;min-width:0}textarea{min-height:80px;line-height:1.6}
+label.f{display:grid;gap:4px;font-size:12px;color:#8d786d}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:10px}
+.muted{color:var(--muted);font-size:12px}.search{margin-bottom:10px}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 10px;margin:6px 0 10px}.feat label{display:flex;gap:6px;align-items:center;font-size:12.5px}.feat input{width:auto}
+dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24px));width:100%;background:var(--paper);color:var(--ink);box-shadow:0 20px 60px #49372d40}dialog::backdrop{background:#3b2e2866}.dlg{padding:16px}.dlg h3{margin:0 0 10px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#61524b;color:#fff;border-radius:14px;padding:10px 16px;font-size:13px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}.toast.on{opacity:1}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><img src="/icon-192.png" alt=""><div><h1>小熊工作室後台</h1><small>只顯示帳號、方案、用量與付款，不顯示任何學生資料</small></div><span class="sp"></span><a class="btn o s" href="/">回到 App</a></header>
+<div id="gate" class="card empty">載入中…</div>
+<div id="app" hidden>
+<nav class="tabs" id="tabs"></nav>
+<main id="main"></main>
+</div>
+</div>
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const SB = supabase.createClient("https://cwsxlfifpydxmmjsiwzg.supabase.co", "sb_publishable_2e3Qb6cB7J70m4d7JSCKlg_HVQNsOS7", { auth: { persistSession: true, autoRefreshToken: true, storageKey: "bear_cloud_auth" } });
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const FEATURES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", team: "班級共享（多位老師）", ai: "AI 小幫手" };
+const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
+const AI_COST_NT = { routine: 1, roster: 1, bus: 1, motor: 1, calendar: 3, lesson: 0.8, lessonChat: 2 }; // measured average cost per task (NT$)
+let D = null, tab = "home", q = "";
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
+const fd = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
+const left = (iso) => Math.ceil((new Date(iso) - Date.now()) / 864e5);
+function subTag(s, via) {
+  if (!s) return `<span class="tag t-none">${via ? "跟隨建立者" : "沒有方案"}</span>`;
+  const p = (D.plans || []).find((x) => x.id === s.plan_id), name = p ? p.name : s.plan_id, l = left(s.ends_at);
+  const cls = l <= 0 ? "t-ro" : s.status === "trial" ? "t-trial" : "t-active";
+  return `<span class="tag ${cls}">${esc(name)}</span><div class="muted">${l <= 0 ? "已到期（唯讀）" : l > 3650 ? "長期有效" : `到 ${fd(s.ends_at)}・剩 ${l} 天`}${s.seats ? `・${s.seats} 位` : ""}</div><div class="muted">AI 已用 ${s.ai_used}${s.ai_bonus ? `・加購剩 ${s.ai_bonus}` : ""}</div>`;
+}
+async function load() {
+  const { data, error } = await SB.rpc("admin_overview");
+  if (error) { $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
+  D = data; render();
+}
+function render() {
+  const T = [["home", "總覽"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["pay", "付款紀錄"], ["set", "設定"]];
+  $("tabs").innerHTML = T.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
+  $("tabs").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { tab = b.dataset.t; q = ""; render(); });
+  const m = $("main");
+  if (tab === "home") m.innerHTML = homeHTML();
+  if (tab === "users") m.innerHTML = usersHTML();
+  if (tab === "ws") m.innerHTML = wsHTML();
+  if (tab === "plans") m.innerHTML = plansHTML();
+  if (tab === "pay") m.innerHTML = payHTML();
+  if (tab === "set") m.innerHTML = setHTML();
+  bind();
+}
+function homeHTML() {
+  const subs = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter(Boolean);
+  const act = subs.filter((s) => left(s.ends_at) > 0 && s.status === "active").length, tri = subs.filter((s) => left(s.ends_at) > 0 && s.status === "trial").length, ro = subs.filter((s) => left(s.ends_at) <= 0).length;
+  const since = Date.now() - 30 * 864e5, rev = D.payments.filter((p) => p.status === "paid" && new Date(p.created_at) > since).reduce((a, p) => a + p.amount, 0);
+  const kinds = D.ai_by_kind_30d || {}, pts = Object.values(kinds).reduce((a, b) => a + b, 0);
+  const costs = (D.settings.ai_costs || {}), estCost = Object.entries(kinds).reduce((a, [k, n]) => a + (n / Math.max(1, costs[k] || 1)) * (AI_COST_NT[k] || 1.5), 0);
+  const soon = subs.filter((s) => { const l = left(s.ends_at); return l > 0 && l <= 7; });
+  return `<div class="grid"><div class="stat"><small>老師帳號</small><b>${D.users.length}</b></div><div class="stat"><small>付費使用中</small><b>${act}</b></div><div class="stat"><small>免費體驗中</small><b>${tri}</b></div><div class="stat"><small>已到期（唯讀）</small><b>${ro}</b></div><div class="stat"><small>近 30 天收入</small><b>NT$${rev.toLocaleString()}</b></div><div class="stat"><small>近 30 天 AI 點數 / 估計成本</small><b>${pts} 點</b><div class="muted">約 NT$${Math.round(estCost)}</div></div></div>
+  <div class="card" style="margin-top:12px"><h3 style="margin:0 0 8px;font-size:15px">7 天內到期</h3>${soon.length ? soon.map((s) => { const who = s.subject_type === "user" ? D.users.find((u) => u.id === s.subject_id)?.name : "班級 " + (D.workspaces.find((w) => w.id === s.subject_id)?.name || ""); return `<div class="kv"><span>${esc(who || s.subject_id)}</span><span>${fd(s.ends_at)}（剩 ${left(s.ends_at)} 天）</span></div>`; }).join("") : '<p class="muted">沒有</p>'}</div>
+  <div class="card"><h3 style="margin:0 0 8px;font-size:15px">近 30 天 AI 用量</h3>${Object.keys(kinds).length ? Object.entries(kinds).map(([k, n]) => `<div class="kv"><span>${esc(AI_KINDS[k] || k)}</span><span>${n} 點</span></div>`).join("") : '<p class="muted">還沒有使用紀錄</p>'}<p class="muted" style="margin-top:8px">估計成本是依實測平均值換算（讀照片約 NT$1、寫教案約 NT$2、整學期 PDF 約 NT$6），實際以 Anthropic 帳單為準。</p></div>`;
+}
+const match = (s) => !q || String(s).toLowerCase().includes(q.toLowerCase());
+function usersHTML() {
+  const list = D.users.filter((u) => match(u.name + " " + u.classes.map((c) => c.name).join(" ")));
+  return `<input class="search" id="q" placeholder="搜尋老師或班級" value="${esc(q)}"><div class="card tw"><table><thead><tr><th>老師</th><th>註冊／最後登入</th><th>個人方案</th><th>班級</th><th>AI 30 天</th><th></th></tr></thead><tbody>${list.map((u) => `<tr><td><b>${esc(u.name || "（未命名）")}</b>${u.admin ? ' <span class="tag t-admin">管理員</span>' : ""}</td><td class="muted">${fd(u.created_at)}<br>${fd(u.last_sign_in)}</td><td>${subTag(u.sub)}</td><td>${u.classes.map((c) => `<div>${esc(c.name)} <span class="muted">${c.role === "owner" ? "建立者" : "成員"}${c.status === "pending" ? "・待核准" : ""}</span></div>`).join("") || '<span class="muted">—</span>'}</td><td>${u.ai_30d} 點</td><td><div class="acts"><button class="btn s" data-pay="user|${u.id}">記錄付款</button><button class="btn o s" data-sub="user|${u.id}">方案設定</button><button class="btn o s" data-pts="user|${u.id}">加點數</button><button class="btn o s" data-adm="${u.id}|${u.admin ? 0 : 1}">${u.admin ? "取消管理員" : "設為管理員"}</button></div></td></tr>`).join("")}</tbody></table>${list.length ? "" : '<div class="empty">沒有符合的老師</div>'}</div>`;
+}
+function wsHTML() {
+  const list = D.workspaces.filter((w) => match(w.name + " " + w.owner));
+  return `<input class="search" id="q" placeholder="搜尋班級或建立者" value="${esc(q)}"><p class="muted" style="margin:0 0 8px">班級沒有自己的方案時，會跟隨建立者的個人方案。要讓班級超過 3 位老師，在「方案設定」把人數調高，或記錄一筆加購人數的付款。</p><div class="card tw"><table><thead><tr><th>班級</th><th>建立者</th><th>老師人數</th><th>班級方案</th><th>AI 30 天</th><th></th></tr></thead><tbody>${list.map((w) => { const os = D.users.find((u) => u.id === w.owner_id)?.sub; return `<tr><td><b>${esc(w.name)}</b><div class="muted">${fd(w.created_at)}</div></td><td>${esc(w.owner || "")}</td><td>${w.members} 位${w.pending ? `<div class="muted">${w.pending} 位待核准</div>` : ""}</td><td>${w.sub ? subTag(w.sub) : `${subTag(null, true)}<div style="margin-top:4px">${os ? subTag(os) : ""}</div>`}</td><td>${w.ai_30d} 點</td><td><div class="acts"><button class="btn s" data-pay="workspace|${w.id}">記錄付款</button><button class="btn o s" data-sub="workspace|${w.id}">方案設定</button>${w.sub ? `<button class="btn o s" data-pts="workspace|${w.id}">加點數</button>` : ""}</div></td></tr>`; }).join("")}</tbody></table>${list.length ? "" : '<div class="empty">沒有符合的班級</div>'}</div>`;
+}
+function plansHTML() {
+  return `<p class="muted" style="margin:0 0 8px">改好按「保存」，前台的方案頁和權限會立刻更新。「公開」打勾的方案才會出現在老師看到的方案頁。</p>${D.plans.map((p, i) => planForm(p, i)).join("")}<button class="btn o" data-newplan="1">＋ 新增方案</button>`;
+}
+function planForm(p, i) {
+  return `<div class="card" data-plan="${i}"><div class="row"><label class="f">方案代碼（英文）<input data-pf="id" value="${esc(p.id)}" ${p._new ? "" : "readonly"}></label><label class="f">方案名稱<input data-pf="name" value="${esc(p.name)}"></label><label class="f">排序<input data-pf="sort" type="number" value="${p.sort || 0}"></label><label class="f" style="align-self:end"><span><input type="checkbox" data-pf="public" ${p.public ? "checked" : ""} style="width:auto"> 公開</span></label></div>
+  <label class="f" style="margin-bottom:10px">說明<input data-pf="description" value="${esc(p.description || "")}"></label>
+  <div class="row"><label class="f">月費 NT$<input data-pf="price_month" type="number" value="${p.price_month}"></label><label class="f">年費 NT$<input data-pf="price_year" type="number" value="${p.price_year}"></label><label class="f">包含老師人數<input data-pf="seats" type="number" min="1" value="${p.seats}"></label><label class="f">加購人數 NT$／人／月<input data-pf="extra_seat_price" type="number" value="${p.extra_seat_price}"></label><label class="f">每月 AI 點數<input data-pf="ai_points" type="number" value="${p.ai_points}"></label></div>
+  <div class="muted">可以使用的功能</div><div class="feat">${Object.entries(FEATURES).map(([k, n]) => `<label><input type="checkbox" data-feat="${k}" ${p.features && p.features[k] ? "checked" : ""}> ${n}</label>`).join("")}</div>
+  <div class="acts"><button class="btn" data-saveplan="${i}">保存</button>${p._new ? "" : `<button class="btn o" data-delplan="${esc(p.id)}">刪除</button>`}</div></div>`;
+}
+function payHTML() {
+  return `<div class="card tw"><table><thead><tr><th>時間</th><th>對象</th><th>內容</th><th>金額</th><th>方式</th><th>備註</th></tr></thead><tbody>${D.payments.map((p) => { const who = p.subject_type === "user" ? D.users.find((u) => u.id === p.subject_id)?.name : "班級 " + (D.workspaces.find((w) => w.id === p.subject_id)?.name || ""); const plan = D.plans.find((x) => x.id === p.plan_id); return `<tr><td class="muted">${fd(p.created_at)}</td><td>${esc(who || "")}</td><td>${plan ? esc(plan.name) + ` ${p.months} 個月` : ""}${p.extra_seats ? `<div>加 ${p.extra_seats} 位老師</div>` : ""}${p.topup_points ? `<div>加購 ${p.topup_points} 點</div>` : ""}</td><td>NT$${p.amount.toLocaleString()}</td><td>${p.method === "ecpay" ? "綠界" : "手動"}<div class="muted">${p.status === "paid" ? "已付款" : p.status}</div></td><td class="muted">${esc(p.note || "")}</td></tr>`; }).join("")}</tbody></table>${D.payments.length ? "" : '<div class="empty">還沒有付款紀錄</div>'}</div>`;
+}
+function setHTML() {
+  const s = D.settings, trial = s.trial || {}, costs = s.ai_costs || {}, tops = s.topups || [];
+  return `<div class="card"><h3 style="margin:0 0 10px;font-size:15px">免費體驗</h3><div class="row"><label class="f">體驗天數<input id="sTrialDays" type="number" min="0" value="${trial.days ?? 7}"></label><label class="f">體驗期間使用的方案<select id="sTrialPlan">${D.plans.map((p) => `<option value="${esc(p.id)}" ${p.id === trial.plan ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label><label class="f">到期後資料保留天數（唯讀）<input id="sRo" type="number" min="0" value="${s.readonly_days ?? 90}"></label></div><button class="btn" data-saveset="trial">保存</button></div>
+  <div class="card"><h3 style="margin:0 0 10px;font-size:15px">每種 AI 工作扣幾點</h3><div class="row">${Object.entries(AI_KINDS).map(([k, n]) => `<label class="f">${n}<input data-cost="${k}" type="number" min="0" value="${costs[k] ?? 1}"></label>`).join("")}</div><button class="btn" data-saveset="costs">保存</button></div>
+  <div class="card"><h3 style="margin:0 0 10px;font-size:15px">AI 點數加購包</h3><div id="tops">${tops.map((t, i) => `<div class="row" data-top="${i}"><label class="f">名稱<input data-tf="name" value="${esc(t.name || "")}"></label><label class="f">點數<input data-tf="points" type="number" value="${t.points}"></label><label class="f">價格 NT$<input data-tf="price" type="number" value="${t.price}"></label><button class="btn o s" data-deltop="${i}" style="align-self:end">刪除</button></div>`).join("")}</div><div class="acts"><button class="btn o" data-addtop="1">＋ 新增加購包</button><button class="btn" data-saveset="topups">保存</button></div></div>
+  <div class="card"><h3 style="margin:0 0 10px;font-size:15px">付款方式說明（老師在方案頁看到的文字）</h3><textarea id="sPay">${esc(typeof s.pay_note === "string" ? s.pay_note : "")}</textarea><button class="btn" data-saveset="pay" style="margin-top:8px">保存</button></div>`;
+}
+function bind() {
+  const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }
+  document.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => payDialog(...b.dataset.pay.split("|")));
+  document.querySelectorAll("[data-sub]").forEach((b) => b.onclick = () => subDialog(...b.dataset.sub.split("|")));
+  document.querySelectorAll("[data-pts]").forEach((b) => b.onclick = () => ptsDialog(...b.dataset.pts.split("|")));
+  document.querySelectorAll("[data-adm]").forEach((b) => b.onclick = async () => { const [id, on] = b.dataset.adm.split("|"); if (!confirm(on === "1" ? "確定讓這位老師也能進後台嗎？" : "確定取消這位老師的管理員權限嗎？")) return; const { error } = await SB.rpc("admin_set_admin", { p_user: id, p_on: on === "1" }); if (error) return toast(error.message); toast("已更新"); load(); });
+  document.querySelectorAll("[data-saveplan]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-plan]"), p = {}; box.querySelectorAll("[data-pf]").forEach((el) => p[el.dataset.pf] = el.type === "checkbox" ? el.checked : el.value.trim()); p.features = {}; box.querySelectorAll("[data-feat]").forEach((el) => p.features[el.dataset.feat] = el.checked); if (!/^[a-z0-9_-]{2,20}$/.test(p.id)) return toast("方案代碼請用 2～20 個英文小寫、數字"); if (!p.name) return toast("請填方案名稱"); const { error } = await SB.rpc("admin_save_plan", { p }); if (error) return toast("保存失敗：" + error.message); toast("方案已保存"); load(); });
+  document.querySelectorAll("[data-delplan]").forEach((b) => b.onclick = async () => { if (!confirm("確定刪除這個方案嗎？")) return; const { error } = await SB.rpc("admin_delete_plan", { p_id: b.dataset.delplan }); if (error) return toast(/plan_in_use/.test(error.message) ? "還有老師在用這個方案，不能刪除；可以取消「公開」讓新老師看不到" : error.message); toast("已刪除"); load(); });
+  document.querySelectorAll("[data-newplan]").forEach((b) => b.onclick = () => { D.plans.push({ _new: true, id: "", name: "", description: "", price_month: 0, price_year: 0, seats: 1, extra_seat_price: 0, ai_points: 0, features: Object.fromEntries(Object.keys(FEATURES).map((k) => [k, true])), public: false, sort: D.plans.length + 1 }); render(); });
+  document.querySelectorAll("[data-addtop]").forEach((b) => b.onclick = () => { D.settings.topups = [...(D.settings.topups || []), { name: "", points: 10, price: 0 }]; render(); });
+  document.querySelectorAll("[data-deltop]").forEach((b) => b.onclick = () => { D.settings.topups.splice(+b.dataset.deltop, 1); render(); });
+  document.querySelectorAll("[data-saveset]").forEach((b) => b.onclick = async () => {
+    const k = b.dataset.saveset; let key, value;
+    if (k === "trial") { const r1 = await SB.rpc("admin_save_setting", { p_key: "trial", p_value: { days: +$("sTrialDays").value || 0, plan: $("sTrialPlan").value } }); const r2 = await SB.rpc("admin_save_setting", { p_key: "readonly_days", p_value: +$("sRo").value || 0 }); if (r1.error || r2.error) return toast("保存失敗"); toast("已保存"); return load(); }
+    if (k === "costs") { key = "ai_costs"; value = {}; document.querySelectorAll("[data-cost]").forEach((el) => value[el.dataset.cost] = Math.max(0, +el.value || 0)); }
+    if (k === "topups") { key = "topups"; value = [...document.querySelectorAll("[data-top]")].map((r) => ({ name: r.querySelector('[data-tf="name"]').value.trim(), points: +r.querySelector('[data-tf="points"]').value || 0, price: +r.querySelector('[data-tf="price"]').value || 0 })).filter((t) => t.points > 0); }
+    if (k === "pay") { key = "pay_note"; value = $("sPay").value; }
+    const { error } = await SB.rpc("admin_save_setting", { p_key: key, p_value: value }); if (error) return toast("保存失敗：" + error.message); toast("已保存"); load();
+  });
+}
+function whoName(type, id) { return type === "user" ? (D.users.find((u) => u.id === id)?.name || "老師") : "班級「" + (D.workspaces.find((w) => w.id === id)?.name || "") + "」"; }
+function curSub(type, id) { return type === "user" ? D.users.find((u) => u.id === id)?.sub : D.workspaces.find((w) => w.id === id)?.sub; }
+function openDlg(html, onOk) {
+  $("dlgBody").innerHTML = html + `<div class="acts" style="margin-top:14px;justify-content:flex-end"><button class="btn o" id="dlgNo">取消</button><button class="btn" id="dlgOk">確定</button></div>`;
+  $("dlgNo").onclick = () => $("dlg").close();
+  $("dlgOk").onclick = async () => { $("dlgOk").disabled = true; try { if (await onOk() !== false) $("dlg").close(); } finally { const b = $("dlgOk"); if (b) b.disabled = false; } };
+  $("dlg").showModal();
+}
+function payDialog(type, id) {
+  const pub = D.plans.filter((p) => p.id !== "trial");
+  openDlg(`<h3>記錄付款・${esc(whoName(type, id))}</h3><p class="muted" style="margin:0 0 10px">收到款項後填這裡，保存後會立刻開通。方案會從今天或目前到期日（比較晚的那天）往後延。</p>
+    <div class="row"><label class="f">方案<select id="pPlan"><option value="">（只加購人數或點數）</option>${pub.map((p) => `<option value="${esc(p.id)}" data-m="${p.price_month}" data-y="${p.price_year}" data-x="${p.extra_seat_price}">${esc(p.name)}</option>`).join("")}</select></label><label class="f">期間<select id="pMonths"><option value="1">1 個月（月繳）</option><option value="12">12 個月（年繳）</option><option value="3">3 個月</option><option value="6">6 個月</option><option value="0">不延長</option></select></label></div>
+    <div class="row"><label class="f">加購老師人數<input id="pSeats" type="number" min="0" value="0"></label><label class="f">加購 AI 點數<input id="pTop" type="number" min="0" value="0"></label><label class="f">收到金額 NT$<input id="pAmt" type="number" min="0" value="0"></label></div>
+    <div class="row"><label class="f">付款方式<select id="pMethod"><option value="manual">轉帳／現金（手動）</option><option value="linepay">LINE Pay（手動）</option><option value="ecpay">綠界</option></select></label><label class="f">備註<input id="pNote" placeholder="例如：轉帳末五碼 12345"></label></div>`, async () => {
+    const months = +$("pMonths").value, plan = $("pPlan").value, seats = +$("pSeats").value || 0, top = +$("pTop").value || 0;
+    if (!plan && !seats && !top) { toast("請選方案，或填加購人數／點數"); return false; }
+    const { error } = await SB.rpc("admin_record_payment", { p_type: type, p_id: id, p_plan: plan, p_months: plan ? months : 0, p_extra_seats: seats, p_topup: top, p_amount: +$("pAmt").value || 0, p_method: $("pMethod").value, p_note: $("pNote").value.trim() });
+    if (error) { toast("保存失敗：" + error.message); return false; }
+    toast("已記錄付款並開通"); load();
+  });
+  const guess = () => { const o = $("pPlan").selectedOptions[0], m = +$("pMonths").value, x = +$("pSeats").value || 0; if (!o || !o.value) return; const price = m === 12 ? +o.dataset.y : +o.dataset.m * m; $("pAmt").value = price + x * +o.dataset.x * Math.max(1, m); };
+  ["pPlan", "pMonths", "pSeats"].forEach((k) => $(k).addEventListener("change", guess));
+}
+function subDialog(type, id) {
+  const s = curSub(type, id) || {}, ends = s.ends_at ? new Date(s.ends_at).toISOString().slice(0, 10) : new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  openDlg(`<h3>方案設定・${esc(whoName(type, id))}</h3><p class="muted" style="margin:0 0 10px">直接設定方案和到期日（不會產生付款紀錄）。${type === "workspace" ? "選「跟隨建立者」就會用建立者的個人方案。" : ""}</p>
+    <div class="row"><label class="f">方案<select id="sPlan"><option value="">${type === "workspace" ? "跟隨建立者" : "沒有方案"}</option>${D.plans.map((p) => `<option value="${esc(p.id)}" ${p.id === s.plan_id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label><label class="f">狀態<select id="sStatus"><option value="active" ${s.status !== "trial" ? "selected" : ""}>付費使用中</option><option value="trial" ${s.status === "trial" ? "selected" : ""}>體驗中</option></select></label></div>
+    <div class="row"><label class="f">到期日<input id="sEnds" type="date" value="${ends}"></label><label class="f">老師人數（空白＝方案預設）<input id="sSeats" type="number" min="1" value="${s.seats ?? ""}"></label></div><label class="f">備註<input id="sNote" value="${esc(s.note || "")}"></label>`, async () => {
+    const plan = $("sPlan").value; if (!plan && !confirm(type === "workspace" ? "確定讓這個班級改成跟隨建立者的方案嗎？" : "確定移除這位老師的方案嗎？移除後會變成沒有方案。")) return false;
+    const { error } = await SB.rpc("admin_set_sub", { p_type: type, p_id: id, p_plan: plan || null, p_status: $("sStatus").value, p_ends: $("sEnds").value ? new Date($("sEnds").value + "T23:59:59+08:00").toISOString() : null, p_seats: $("sSeats").value ? +$("sSeats").value : null, p_note: $("sNote").value.trim() });
+    if (error) { toast("保存失敗：" + error.message); return false; }
+    toast("已更新"); load();
+  });
+}
+function ptsDialog(type, id) {
+  openDlg(`<h3>調整 AI 點數・${esc(whoName(type, id))}</h3><p class="muted" style="margin:0 0 10px">加到「加購點數」，不會過期。填負數可以扣回。</p><div class="row"><label class="f">點數<input id="aPts" type="number" value="20"></label><label class="f">原因<input id="aNote" placeholder="例如：補償、贈送"></label></div>`, async () => {
+    const { error } = await SB.rpc("admin_add_points", { p_type: type, p_id: id, p_points: +$("aPts").value || 0, p_note: $("aNote").value.trim() });
+    if (error) { toast(/no subscription/.test(error.message) ? "這個對象還沒有方案，請先設定方案" : "失敗：" + error.message); return false; }
+    toast("點數已更新"); load();
+  });
+}
+(async () => {
+  const { data } = await SB.auth.getSession();
+  if (!data.session) { $("gate").innerHTML = `請先到 <a href="/">小熊工作室</a> 用 LINE 登入，再回來這一頁。`; return; }
+  const { data: ok } = await SB.rpc("is_admin");
+  if (!ok) { $("gate").innerHTML = "這個帳號沒有後台權限。"; return; }
+  $("gate").hidden = true; $("app").hidden = false; load();
+})();
+</script>
+</body>
+</html>

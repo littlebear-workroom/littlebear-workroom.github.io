@@ -10,7 +10,7 @@ const cors = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-const DAILY_LIMIT = 80;
+const DAILY_LIMIT = 150;
 
 const str = { type: "string" };
 const obj = (props: Record<string, unknown>) => ({ type: "object", properties: props, required: Object.keys(props), additionalProperties: false });
@@ -153,11 +153,20 @@ Deno.serve(async (req) => {
     if (!images.length && !kind.textOnly) return json({ error: "沒有收到圖片" }, 400);
     if (!Deno.env.get("ANTHROPIC_API_KEY")) return json({ error: "AI 讀圖還沒設定好", fallback: true }, 503);
 
-    // daily cap per teacher
+    // safety cap per teacher per day (independent of plan points)
     const day = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
     const { data: use } = await admin.from("ai_usage").select("count").eq("user_id", u.user.id).eq("day", day).maybeSingle();
-    if ((use?.count || 0) >= DAILY_LIMIT) return json({ error: `今天已經用 AI 讀了 ${DAILY_LIMIT} 次，明天再試，或改用手動輸入`, fallback: true }, 429);
+    if ((use?.count || 0) >= DAILY_LIMIT) return json({ error: `今天已經用 AI ${DAILY_LIMIT} 次了，明天再試`, fallback: true }, 429);
+    // plan points: charged before calling the AI, refunded if it does not finish
+    const wsId = typeof body.ws === "string" && /^[0-9a-f-]{36}$/.test(body.ws) ? body.ws : null;
+    const { data: charge, error: chErr } = await admin.rpc("ai_consume", { p_user: u.user.id, p_ws: wsId, p_kind: body.kind });
+    if (chErr) return json({ error: "AI 點數檢查失敗，請稍後再試", fallback: true }, 500);
+    if (!charge?.ok) {
+      const why: Record<string, string> = { readonly: "方案已到期，AI 功能暫停。續約後就能繼續使用", no_ai: "目前的方案沒有包含 AI 功能", no_points: `AI 點數不夠了（這次需要 ${charge?.cost} 點，剩 ${charge?.left} 點），可以加購點數`, no_plan: "還沒有可用的方案" };
+      return json({ error: why[charge?.error] || "沒有 AI 點數", fallback: true, code: charge?.error }, 402);
+    }
     await admin.from("ai_usage").upsert({ user_id: u.user.id, day, count: (use?.count || 0) + 1 });
+    const refund = () => admin.rpc("ai_refund", { p_subject_type: charge.subject_type, p_subject_id: charge.subject_id, p_points: charge.cost, p_user: u.user.id });
 
     const client = new Anthropic();
     const content: any[] = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } }));
@@ -174,20 +183,22 @@ Deno.serve(async (req) => {
         messages: [{ role: "user", content }],
       } as any);
     } catch (e) {
+      await refund();
       if (e instanceof Anthropic.AuthenticationError) return json({ error: "AI 金鑰無效，請通知管理者", fallback: true }, 502);
       if (e instanceof Anthropic.RateLimitError) return json({ error: "AI 暫時太忙，請稍後再試", fallback: true }, 429);
       if (e instanceof Anthropic.BadRequestError) return json({ error: "AI 無法讀取這個檔案：" + e.message, fallback: true }, 400);
       if (e instanceof Anthropic.APIError) return json({ error: `AI 服務錯誤（${e.status}），請稍後再試`, fallback: true }, 502);
       throw e;
     }
+    if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens") await refund();
     if (response.stop_reason === "refusal") return json({ error: "AI 沒有辦法處理這張圖片，請改用手動輸入", fallback: true }, 422);
     if (response.stop_reason === "max_tokens") return json({ error: "內容太多，請分成幾張照片上傳", fallback: true }, 422);
     const text = (response.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
     let data: unknown;
-    try { data = JSON.parse(text); } catch { return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
+    try { data = JSON.parse(text); } catch { await refund(); return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
     const d: any = data;
     console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length }));  // counts only: never log what was read (it can contain children's names)
-    return json({ ok: true, data, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
+    return json({ ok: true, data, points: { cost: charge.cost, left: charge.left }, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e), fallback: true }, 500);
   }

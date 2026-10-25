@@ -47,7 +47,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const FEATURES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", team: "班級共享（多位老師）", ai: "AI 小幫手" };
 const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
 const AI_COST_NT = { routine: 1, roster: 1, bus: 1, motor: 1, calendar: 3, lesson: 0.8, lessonChat: 2 }; // measured average cost per task (NT$)
-let D = null, tab = "home", q = "";
+let D = null, U = null, tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
 const fd = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 const left = (iso) => Math.ceil((new Date(iso) - Date.now()) / 864e5);
@@ -58,33 +58,56 @@ function subTag(s, via) {
   return `<span class="tag ${cls}">${esc(name)}</span><div class="muted">${l <= 0 ? "已到期（唯讀）" : l > 3650 ? "長期有效" : `到 ${fd(s.ends_at)}・剩 ${l} 天`}${s.seats ? `・${s.seats} 位` : ""}</div><div class="muted">AI 已用 ${s.ai_used}${s.ai_bonus ? `・加購剩 ${s.ai_bonus}` : ""}</div>`;
 }
 async function load() {
-  const { data, error } = await SB.rpc("admin_overview");
-  if (error) { $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
-  D = data; render();
+  const [{ data, error }, us] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage")]);
+  if (error) { $("gate").hidden = false; $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
+  D = data; U = us.data || { by_user: {}, by_ws: {}, paid_user: {}, paid_ws: {}, total: {}, by_kind: {}, usd_twd: 32 }; render();
 }
 function render() {
-  const T = [["home", "總覽"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["pay", "付款紀錄"], ["set", "設定"]];
+  const T = [["home", "總覽"], ["usage", "用量與價格"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["pay", "付款紀錄"], ["set", "設定"]];
   $("tabs").innerHTML = T.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
   $("tabs").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { tab = b.dataset.t; q = ""; render(); });
   const m = $("main");
   if (tab === "home") m.innerHTML = homeHTML();
   if (tab === "users") m.innerHTML = usersHTML();
+  if (tab === "usage") m.innerHTML = usageHTML();
   if (tab === "ws") m.innerHTML = wsHTML();
   if (tab === "plans") m.innerHTML = plansHTML();
   if (tab === "pay") m.innerHTML = payHTML();
   if (tab === "set") m.innerHTML = setHTML();
   bind();
 }
+const nt = (usd, d = 1) => { const v = Number(usd || 0) * (U?.usd_twd || 32); return "NT$" + (Math.abs(v) < 0.05 ? 0 : v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: v && Math.abs(v) < 100 ? d : 0 }); };
+function monthlyPrice(sub) { if (!sub || sub.status === "trial" || left(sub.ends_at) <= 0) return 0; const p = D.plans.find((x) => x.id === sub.plan_id); if (!p) return 0; const extra = sub.seats && sub.seats > p.seats ? (sub.seats - p.seats) * p.extra_seat_price : 0; return p.price_month + extra; }
+function usageHTML() {
+  const rate = U.usd_twd || 32, zero = { calls30: 0, points30: 0, cost30: 0, month_points: 0, month_cost: 0, calls_all: 0, cost_all: 0 };
+  const wsRows = D.workspaces.map((w) => { const own = w.sub, os = D.users.find((u) => u.id === w.owner_id)?.sub, sub = own || os, u = U.by_ws[w.id] || zero, price = monthlyPrice(sub); return { id: w.id, type: "workspace", name: w.name, sub: "班級：" + (sub ? (D.plans.find((p) => p.id === sub.plan_id)?.name || sub.plan_id) : "沒有方案") + (own ? "" : "（跟隨建立者）"), state: sub, members: w.members, price, paid: U.paid_ws[w.id] || 0, u, margin: price - u.cost30 * rate }; });
+  const userRows = D.users.map((x) => { const u = U.by_user[x.id] || zero, price = monthlyPrice(x.sub); return { id: x.id, type: "user", name: x.name || "（未命名）", sub: x.sub ? (D.plans.find((p) => p.id === x.sub.plan_id)?.name || x.sub.plan_id) : "沒有方案", state: x.sub, members: null, price, paid: U.paid_user[x.id] || 0, u, margin: price - u.cost30 * rate }; });
+  const sorter = { cost: (a, b) => b.u.cost30 - a.u.cost30, margin: (a, b) => a.margin - b.margin, paid: (a, b) => b.paid - a.paid, name: (a, b) => a.name.localeCompare(b.name, "zh-Hant") }[usort];
+  const head = `<tr><th>名稱</th><th>方案</th><th>月費</th><th>累計付款</th><th>本月 AI</th><th>近 30 天 AI</th><th>近 30 天成本</th><th>月費 − AI 成本</th><th></th></tr>`;
+  const row = (r) => `<tr><td><b>${esc(r.name)}</b>${r.members != null ? `<div class="muted">${r.members} 位老師</div>` : ""}</td><td>${esc(r.sub)}<div class="muted">${r.state ? (left(r.state.ends_at) <= 0 ? "已到期" : r.state.status === "trial" ? "體驗中" : "到 " + fd(r.state.ends_at)) : ""}</div></td><td>${r.price ? "NT$" + r.price.toLocaleString() : '<span class="muted">—</span>'}</td><td>NT$${r.paid.toLocaleString()}</td><td>${r.u.month_points} 點<div class="muted">${nt(r.u.month_cost)}</div></td><td>${r.u.calls30} 次・${r.u.points30} 點</td><td>${nt(r.u.cost30)}</td><td style="color:${r.margin < 0 ? "var(--bad)" : "var(--sage)"};font-weight:700">${r.price || r.u.cost30 ? (r.margin < 0 ? "−" : "") + "NT$" + Math.abs(Math.round(r.margin)).toLocaleString() : "—"}</td><td><button class="btn o s" data-detail="${r.type}|${r.id}">明細</button></td></tr>`;
+  const sortBtns = [["cost", "成本高的在前"], ["margin", "賠錢的在前"], ["paid", "付款多的在前"], ["name", "名稱"]].map(([k, n]) => `<button class="btn ${usort === k ? "" : "o"} s" data-usort="${k}">${n}</button>`).join("");
+  return `<div class="acts" style="margin-bottom:10px">${sortBtns}</div><p class="muted" style="margin:0 0 8px">「月費」是目前方案每月的價格（含加購人數）；體驗中、已到期顯示 —。「月費 − AI 成本」是紅字的，代表 AI 用量已經超過月費。</p>
+  <div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">班級</h3><table><thead>${head}</thead><tbody>${wsRows.sort(sorter).map(row).join("")}</tbody></table>${wsRows.length ? "" : '<div class="empty">還沒有班級</div>'}</div>
+  <div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">老師（個人）</h3><table><thead>${head}</thead><tbody>${userRows.sort(sorter).map(row).join("")}</tbody></table></div>`;
+}
+async function detailDialog(type, id) {
+  const { data, error } = await SB.rpc("admin_usage_detail", { p_type: type, p_id: id });
+  if (error) return toast(error.message);
+  const rows = data || [];
+  $("dlgBody").innerHTML = `<h3>AI 使用明細・${esc(whoName(type, id))}</h3><p class="muted" style="margin:0 0 8px">最近 100 筆，只記錄做了什麼工作和花費，不記錄內容。</p><div class="tw" style="max-height:60vh;overflow:auto"><table style="min-width:460px"><thead><tr><th>時間</th><th>老師</th><th>工作</th><th>點數</th><th>成本</th></tr></thead><tbody>${rows.map((r) => `<tr><td class="muted">${new Date(r.at).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td><td>${esc(r.who)}${r.ws && type === "user" ? `<div class="muted">${esc(r.ws)}</div>` : ""}</td><td>${esc(AI_KINDS[r.kind] || (r.kind === "refund" ? "退回點數" : r.kind === "topup" ? "加購" : r.kind === "admin" ? "管理者調整" : r.kind))}</td><td>${r.points > 0 ? r.points : "+" + -r.points}</td><td>${r.cost != null ? nt(r.cost, 1) : '<span class="muted">—</span>'}</td></tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="empty">還沒有使用紀錄</div>'}</div><div class="acts" style="margin-top:12px;justify-content:flex-end"><button class="btn o" id="dlgNo">關閉</button></div>`;
+  $("dlgNo").onclick = () => $("dlg").close();
+  $("dlg").showModal();
+}
 function homeHTML() {
   const subs = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter(Boolean);
   const act = subs.filter((s) => left(s.ends_at) > 0 && s.status === "active").length, tri = subs.filter((s) => left(s.ends_at) > 0 && s.status === "trial").length, ro = subs.filter((s) => left(s.ends_at) <= 0).length;
   const since = Date.now() - 30 * 864e5, rev = D.payments.filter((p) => p.status === "paid" && new Date(p.created_at) > since).reduce((a, p) => a + p.amount, 0);
   const kinds = D.ai_by_kind_30d || {}, pts = Object.values(kinds).reduce((a, b) => a + b, 0);
-  const costs = (D.settings.ai_costs || {}), estCost = Object.entries(kinds).reduce((a, [k, n]) => a + (n / Math.max(1, costs[k] || 1)) * (AI_COST_NT[k] || 1.5), 0);
+  const estCost = (U.total?.cost30 || 0) * (U.usd_twd || 32);
   const soon = subs.filter((s) => { const l = left(s.ends_at); return l > 0 && l <= 7; });
-  return `<div class="grid"><div class="stat"><small>老師帳號</small><b>${D.users.length}</b></div><div class="stat"><small>付費使用中</small><b>${act}</b></div><div class="stat"><small>免費體驗中</small><b>${tri}</b></div><div class="stat"><small>已到期（唯讀）</small><b>${ro}</b></div><div class="stat"><small>近 30 天收入</small><b>NT$${rev.toLocaleString()}</b></div><div class="stat"><small>近 30 天 AI 點數 / 估計成本</small><b>${pts} 點</b><div class="muted">約 NT$${Math.round(estCost)}</div></div></div>
+  return `<div class="grid"><div class="stat"><small>老師帳號</small><b>${D.users.length}</b></div><div class="stat"><small>付費使用中</small><b>${act}</b></div><div class="stat"><small>免費體驗中</small><b>${tri}</b></div><div class="stat"><small>已到期（唯讀）</small><b>${ro}</b></div><div class="stat"><small>近 30 天收入</small><b>NT$${rev.toLocaleString()}</b></div><div class="stat"><small>近 30 天 AI 點數 / 實際成本</small><b>${pts} 點</b><div class="muted">${nt(U.total?.cost30 || 0)}（${U.total?.calls30 || 0} 次）</div></div><div class="stat"><small>近 30 天收入 − AI 成本</small><b>${rev - estCost < -0.5 ? "−" : ""}NT$${Math.abs(Math.round(rev - estCost)).toLocaleString()}</b><div class="muted">還沒扣主機、金流手續費</div></div></div>
   <div class="card" style="margin-top:12px"><h3 style="margin:0 0 8px;font-size:15px">7 天內到期</h3>${soon.length ? soon.map((s) => { const who = s.subject_type === "user" ? D.users.find((u) => u.id === s.subject_id)?.name : "班級 " + (D.workspaces.find((w) => w.id === s.subject_id)?.name || ""); return `<div class="kv"><span>${esc(who || s.subject_id)}</span><span>${fd(s.ends_at)}（剩 ${left(s.ends_at)} 天）</span></div>`; }).join("") : '<p class="muted">沒有</p>'}</div>
-  <div class="card"><h3 style="margin:0 0 8px;font-size:15px">近 30 天 AI 用量</h3>${Object.keys(kinds).length ? Object.entries(kinds).map(([k, n]) => `<div class="kv"><span>${esc(AI_KINDS[k] || k)}</span><span>${n} 點</span></div>`).join("") : '<p class="muted">還沒有使用紀錄</p>'}<p class="muted" style="margin-top:8px">估計成本是依實測平均值換算（讀照片約 NT$1、寫教案約 NT$2、整學期 PDF 約 NT$6），實際以 Anthropic 帳單為準。</p></div>`;
+  <div class="card"><h3 style="margin:0 0 8px;font-size:15px">近 30 天 AI 用量</h3>${Object.keys(kinds).length ? Object.entries(kinds).map(([k, n]) => `<div class="kv"><span>${esc(AI_KINDS[k] || k)}</span><span>${n} 點</span></div>`).join("") : '<p class="muted">還沒有使用紀錄</p>'}${Object.keys(U.by_kind || {}).length ? `<div class="tw" style="margin-top:10px"><table style="min-width:420px"><thead><tr><th>AI 工作</th><th>次數</th><th>扣點</th><th>實際成本</th><th>平均每次</th></tr></thead><tbody>${Object.entries(U.by_kind).map(([k, v]) => `<tr><td>${esc(AI_KINDS[k] || k)}</td><td>${v.calls}</td><td>${v.points}</td><td>${nt(v.cost)}</td><td>${nt(v.avg, 1)}</td></tr>`).join("")}</tbody></table></div>` : ""}<p class="muted" style="margin-top:8px">成本依每次實際用量計算（換算匯率 1 美元 = ${U.usd_twd || 32} 元，可在「設定」修改），金額以 Anthropic 帳單為準。</p></div>`;
 }
 const match = (s) => !q || String(s).toLowerCase().includes(q.toLowerCase());
 function usersHTML() {
@@ -111,6 +134,7 @@ function payHTML() {
 function setHTML() {
   const s = D.settings, trial = s.trial || {}, costs = s.ai_costs || {}, tops = s.topups || [];
   return `<div class="card"><h3 style="margin:0 0 10px;font-size:15px">免費體驗</h3><div class="row"><label class="f">體驗天數<input id="sTrialDays" type="number" min="0" value="${trial.days ?? 7}"></label><label class="f">體驗期間使用的方案<select id="sTrialPlan">${D.plans.map((p) => `<option value="${esc(p.id)}" ${p.id === trial.plan ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label><label class="f">到期後資料保留天數（唯讀）<input id="sRo" type="number" min="0" value="${s.readonly_days ?? 90}"></label></div><button class="btn" data-saveset="trial">保存</button></div>
+  <div class="card"><h3 style="margin:0 0 10px;font-size:15px">成本換算</h3><div class="row"><label class="f">美元匯率（1 美元 = ? 元）<input id="sRate" type="number" step="0.1" value="${s.usd_twd ?? 32}"></label><label class="f">AI 輸入價格（美元／百萬 tokens）<input id="sPin" type="number" step="0.01" value="${(s.ai_price_usd || {}).in ?? 4}"></label><label class="f">AI 輸出價格（美元／百萬 tokens）<input id="sPout" type="number" step="0.01" value="${(s.ai_price_usd || {}).out ?? 20}"></label></div><button class="btn" data-saveset="rate">保存</button></div>
   <div class="card"><h3 style="margin:0 0 10px;font-size:15px">每種 AI 工作扣幾點</h3><div class="row">${Object.entries(AI_KINDS).map(([k, n]) => `<label class="f">${n}<input data-cost="${k}" type="number" min="0" value="${costs[k] ?? 1}"></label>`).join("")}</div><button class="btn" data-saveset="costs">保存</button></div>
   <div class="card"><h3 style="margin:0 0 10px;font-size:15px">AI 點數加購包</h3><div id="tops">${tops.map((t, i) => `<div class="row" data-top="${i}"><label class="f">名稱<input data-tf="name" value="${esc(t.name || "")}"></label><label class="f">點數<input data-tf="points" type="number" value="${t.points}"></label><label class="f">價格 NT$<input data-tf="price" type="number" value="${t.price}"></label><button class="btn o s" data-deltop="${i}" style="align-self:end">刪除</button></div>`).join("")}</div><div class="acts"><button class="btn o" data-addtop="1">＋ 新增加購包</button><button class="btn" data-saveset="topups">保存</button></div></div>
   <div class="card"><h3 style="margin:0 0 10px;font-size:15px">付款方式說明（老師在方案頁看到的文字）</h3><textarea id="sPay">${esc(typeof s.pay_note === "string" ? s.pay_note : "")}</textarea><button class="btn" data-saveset="pay" style="margin-top:8px">保存</button></div>`;
@@ -118,6 +142,8 @@ function setHTML() {
 function bind() {
   const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }
   document.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => payDialog(...b.dataset.pay.split("|")));
+  document.querySelectorAll("[data-detail]").forEach((b) => b.onclick = () => detailDialog(...b.dataset.detail.split("|")));
+  document.querySelectorAll("[data-usort]").forEach((b) => b.onclick = () => { usort = b.dataset.usort; render(); });
   document.querySelectorAll("[data-sub]").forEach((b) => b.onclick = () => subDialog(...b.dataset.sub.split("|")));
   document.querySelectorAll("[data-pts]").forEach((b) => b.onclick = () => ptsDialog(...b.dataset.pts.split("|")));
   document.querySelectorAll("[data-adm]").forEach((b) => b.onclick = async () => { const [id, on] = b.dataset.adm.split("|"); if (!confirm(on === "1" ? "確定讓這位老師也能進後台嗎？" : "確定取消這位老師的管理員權限嗎？")) return; const { error } = await SB.rpc("admin_set_admin", { p_user: id, p_on: on === "1" }); if (error) return toast(error.message); toast("已更新"); load(); });
@@ -129,6 +155,7 @@ function bind() {
   document.querySelectorAll("[data-saveset]").forEach((b) => b.onclick = async () => {
     const k = b.dataset.saveset; let key, value;
     if (k === "trial") { const r1 = await SB.rpc("admin_save_setting", { p_key: "trial", p_value: { days: +$("sTrialDays").value || 0, plan: $("sTrialPlan").value } }); const r2 = await SB.rpc("admin_save_setting", { p_key: "readonly_days", p_value: +$("sRo").value || 0 }); if (r1.error || r2.error) return toast("保存失敗"); toast("已保存"); return load(); }
+    if (k === "rate") { const r1 = await SB.rpc("admin_save_setting", { p_key: "usd_twd", p_value: +$("sRate").value || 32 }); const r2 = await SB.rpc("admin_save_setting", { p_key: "ai_price_usd", p_value: { in: +$("sPin").value || 0, out: +$("sPout").value || 0 } }); if (r1.error || r2.error) return toast("保存失敗"); toast("已保存"); return load(); }
     if (k === "costs") { key = "ai_costs"; value = {}; document.querySelectorAll("[data-cost]").forEach((el) => value[el.dataset.cost] = Math.max(0, +el.value || 0)); }
     if (k === "topups") { key = "topups"; value = [...document.querySelectorAll("[data-top]")].map((r) => ({ name: r.querySelector('[data-tf="name"]').value.trim(), points: +r.querySelector('[data-tf="points"]').value || 0, price: +r.querySelector('[data-tf="price"]').value || 0 })).filter((t) => t.points > 0); }
     if (k === "pay") { key = "pay_note"; value = $("sPay").value; }

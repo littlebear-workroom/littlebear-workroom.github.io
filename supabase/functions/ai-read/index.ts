@@ -197,6 +197,7 @@ Deno.serve(async (req) => {
     let data: unknown;
     try { data = JSON.parse(text); } catch { await refund(); return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
     const d: any = data;
+    if (charge.ledger_id) await admin.rpc("ai_record_cost", { p_id: charge.ledger_id, p_in: response.usage?.input_tokens || 0, p_out: response.usage?.output_tokens || 0 });
     console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length }));  // counts only: never log what was read (it can contain children's names)
     return json({ ok: true, data, points: { cost: charge.cost, left: charge.left }, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {

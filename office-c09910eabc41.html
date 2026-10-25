@@ -27,6 +27,7 @@ input,select,textarea{border:1px solid #eadbd1;border-radius:10px;background:#ff
 label.f{display:grid;gap:4px;font-size:12px;color:#8d786d}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:10px}
 .muted{color:var(--muted);font-size:12px}.search{margin-bottom:10px}
 .feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 10px;margin:6px 0 10px}.feat label{display:flex;gap:6px;align-items:center;font-size:12.5px}.feat input{width:auto}
+.pa-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.pa-sum{white-space:pre-wrap;line-height:1.75;margin:8px 0 0}.pa-plan{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:10px;background:#fffaf5}.pa-plan h4{margin:0;font-size:14.5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pa-cmp{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}.pa-cmp td{padding:5px 4px;border-bottom:1px dashed var(--line)}.pa-cmp td:first-child{color:var(--muted);width:30%}.pa-cmp .up{color:var(--bad);font-weight:700}.pa-cmp .down{color:var(--sage);font-weight:700}.pa-chips{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}.pa-chips span{font-size:11px;border-radius:999px;padding:2px 8px;background:#f1e4dc;color:#6e5d54}.pa-chips span.add{background:var(--sageb);color:var(--sage);font-weight:700}.pa-chips span.del{background:var(--badb);color:var(--bad);font-weight:700;text-decoration:line-through}.pa-hl{margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.7}.pa-plan details{margin-top:6px;font-size:12.5px}.pa-plan details p{white-space:pre-wrap;line-height:1.7;margin:6px 0 0;color:#6e5d54}.pa-busy{background:#f3f6fb;border-radius:12px;padding:12px;margin-top:10px;color:var(--blue)}
 dialog{border:0;border-radius:18px;padding:0;max-width:min(520px,calc(100vw - 24px));width:100%;background:var(--paper);color:var(--ink);box-shadow:0 20px 60px #49372d40}dialog::backdrop{background:#3b2e2866}.dlg{padding:16px}.dlg h3{margin:0 0 10px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#61524b;color:#fff;border-radius:14px;padding:10px 16px;font-size:13px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}.toast.on{opacity:1}
 .empty{padding:30px;text-align:center;color:var(--muted)}
@@ -52,7 +53,7 @@ textarea[data-af=body]{min-height:170px;resize:vertical}
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261026030355"></script>
+<script src="features.js?v=20261026031602"></script>
 <script>
 // Read before LINE's SDK tidies the address bar: set when the login was started from the home-screen app.
 const BOOT_PAIR = (() => { let t = location.search + location.hash, v = ""; for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } } try { if (v) sessionStorage.setItem("adm_boot_pair", v); else v = sessionStorage.getItem("adm_boot_pair") || ""; } catch {} return v; })();
@@ -129,6 +130,7 @@ async function load() {
   // AI tasks known from settings or usage but not in features.js still show up
   Object.keys({ ...(data?.settings?.ai_costs || {}), ...(us.data?.by_kind || {}) }).forEach((k) => { if (!AI_KINDS[k] && k !== "admin" && k !== "topup" && k !== "refund") AI_KINDS[k] = k; });
   if (!window.__synced && data) { window.__synced = true; const r = await syncCatalog(data); if (r && (r.features_added || r.ai_kinds_added)) { toast(`已自動加入 ${r.features_added} 個新功能、${r.ai_kinds_added} 種新的 AI 工作`); return load(); } }
+  if (!window.__planAiChecked && data && !error) { window.__planAiChecked = true; const v = data.settings.plan_ai_advice; if (!v || v.fp !== catalogFp()) setTimeout(() => runPlanAI(!!v), 1500); }
   if (!window.__relSynced && data && !error) { window.__relSynced = true; const ids = await syncReleases(data, window.__newKeys); if (ids.length) { await load(); for (const id of ids) await askNotify(id); return; } }
   if (error) { $("gate").hidden = false; $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
   D = data; U = us.data || { by_user: {}, by_ws: {}, paid_user: {}, paid_ws: {}, total: {}, by_kind: {}, usd_twd: 32 }; render();
@@ -201,6 +203,91 @@ function usageRatio(planId, fallback) {
   const avg = subs.reduce((a, x) => a + (x.use?.points30 || 0), 0) / subs.length;
   return { ratio: Math.min(1.5, avg / plan.ai_points), real: true, n: subs.length };
 }
+// ---- AI plan advisor: features per plan + prices, re-run automatically when features or AI tasks change ----
+let PLAN_AI_BUSY = false;
+const catalogFp = () => JSON.stringify([Object.keys(FEATURES).sort(), Object.keys(AI_REG).sort()]);
+function costBasics() {
+  const A = advSettings(), M = costModel(), fixedTotal = A.fixed.reduce((a, f) => a + (+f.amount || 0), 0);
+  const paying = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter((x) => x && x.status === "active" && left(x.ends_at) > 0 && left(x.ends_at) < 3650).length;
+  return { A, M, fixedTotal, paying, fixedShare: fixedTotal / Math.max(paying, A.subs, 1), fee: A.fee / 100, target: A.margin / 100 };
+}
+function planEval(p) {
+  const { A, M, fixedShare, fee, target } = costBasics(), hasAI = !!(p.features || []).includes?.("ai") || (p.features && p.features.ai === true);
+  const pts = hasAI ? p.ai_points : 0, aiExp = pts * (A.usage / 100) * M.avgPerPoint, aiWorst = pts * M.worstPerPoint;
+  const margin = p.price_month - aiExp - fixedShare - p.price_month * fee, worst = p.price_month - aiWorst - fixedShare - p.price_month * fee;
+  return { margin, worst, pct: p.price_month ? margin / p.price_month : 0, status: worst < 0 ? "bad" : p.price_month && margin / p.price_month < target ? "warn" : "ok" };
+}
+function planAIContext() {
+  const { A, M, fixedTotal, paying, fixedShare } = costBasics();
+  const subsBy = {}; [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].forEach((x) => { if (x && x.status === "active" && left(x.ends_at) > 0) subsBy[x.plan_id] = (subsBy[x.plan_id] || 0) + 1; });
+  const r1 = (v) => Math.round(v * 100) / 100;
+  return {
+    features: (window.BEAR_FEATURES || []).map((f) => ({ key: f.key, name: f.name, desc: f.desc || "", ai: (window.BEAR_AI_KINDS || []).filter((k) => k.feature === f.key).map((k) => k.name) })),
+    aiKinds: M.kinds.map((x) => ({ kind: x.k, name: x.name, feature: AI_REG[x.k]?.feature || "", points: x.pts, costNT: r1(x.callNT), calls: x.calls })),
+    plans: D.plans.filter((p) => ["personal", "class", "ai"].includes(p.id)).map((p) => ({ id: p.id, name: p.name, price_month: p.price_month, price_year: p.price_year, seats: p.seats, extra_seat_price: p.extra_seat_price, ai_points: p.ai_points, features: Object.keys(p.features || {}).filter((k) => p.features[k]), subscribers: subsBy[p.id] || 0 })),
+    topups: D.settings.topups || [],
+    cost: { avgPerPoint: r1(M.avgPerPoint), worstPerPoint: r1(M.worstPerPoint), fee: A.fee, margin: A.margin, usage: A.usage, fixedMonthly: fixedTotal, fixedShare: Math.round(fixedShare) },
+    stats: { teachers: D.users.length, paying },
+  };
+}
+async function runPlanAI(auto) {
+  if (PLAN_AI_BUSY) return; PLAN_AI_BUSY = true; if (tab === "plans") render();
+  try {
+    const { data: { session } } = await SB.auth.getSession();
+    const r = await fetch(SB_FN + "ai-read", { method: "POST", headers: { "Content-Type": "application/json", apikey: SB_PK, Authorization: "Bearer " + (session?.access_token || "") }, body: JSON.stringify({ kind: "planAdvice", context: planAIContext() }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || "HTTP " + r.status);
+    const res = j.data, known = new Set(Object.keys(FEATURES));
+    (res.plans || []).forEach((p) => { p.features = [...new Set((p.features || []).filter((k) => known.has(k)))]; });
+    const price = D.settings.ai_price_usd || {}, usd = ((j.usage?.input || 0) * (price.in ?? 4) + (j.usage?.output || 0) * (price.out ?? 20)) / 1e6;
+    const val = { at: new Date().toISOString(), fp: catalogFp(), auto: !!auto, costNT: Math.round(usd * (U.usd_twd || 32) * 10) / 10, result: res };
+    const { error } = await SB.rpc("admin_save_setting", { p_key: "plan_ai_advice", p_value: val }); if (error) throw error;
+    D.settings.plan_ai_advice = val;
+    toast(auto ? "功能有更新，AI 已經重新分析方案建議（在「方案」分頁）" : "AI 方案建議完成");
+  } catch (e) { toast("AI 分析失敗：" + (e.message || e)); }
+  finally { PLAN_AI_BUSY = false; if (tab === "plans") render(); }
+}
+function planAIHTML() {
+  const v = D.settings.plan_ai_advice, res = v?.result, stale = v && v.fp !== catalogFp();
+  const head = `<div class="pa-head"><div><h3 style="margin:0;font-size:15px">🤖 AI 方案建議</h3><div class="muted" style="margin-top:3px">AI 依照每個功能、AI 成本和目標毛利，建議三個方案各開哪些功能、月費年費和點數。之後新增功能時會自動重新分析。${v ? `<br>上次分析：${fdt(v.at)}${v.auto ? "（功能更新後自動分析）" : ""}${v.costNT ? `・這次花費約 NT$${v.costNT}` : ""}` : ""}</div></div><button class="btn ${v ? "o " : ""}s" data-planai="1" ${PLAN_AI_BUSY ? "disabled" : ""}>${v ? "重新分析" : "請 AI 分析"}</button></div>`;
+  if (PLAN_AI_BUSY) return `<div class="card">${head}<div class="pa-busy">AI 正在分析方案，大約需要 1～2 分鐘，可以先看其他分頁…</div></div>`;
+  if (!res) return `<div class="card">${head}<p class="muted" style="margin:10px 0 0">還沒有分析過。每次分析大約花 NT$5～15 的 AI 費用（不扣任何方案點數）。</p></div>`;
+  const n = (x) => "NT$" + Math.round(x).toLocaleString();
+  const tag = (st) => st === "bad" ? '<span class="tag t-ro">最壞情況會賠錢</span>' : st === "warn" ? '<span class="tag t-trial">毛利低於目標</span>' : '<span class="tag t-active">毛利健康</span>';
+  const cmp = (label, a, b, money) => { const d = (b ?? 0) - (a ?? 0); return `<tr><td>${label}</td><td>${money ? n(a) : a}</td><td class="${d > 0 ? (money ? "up" : "down") : d < 0 ? (money ? "down" : "up") : ""}">${money ? n(b) : b}${d ? ` <small>(${d > 0 ? "+" : ""}${money ? d.toLocaleString() : d})</small>` : ""}</td></tr>`; };
+  const plans = (res.plans || []).map((sp) => {
+    const cur = D.plans.find((p) => p.id === sp.id); if (!cur) return "";
+    const curOn = Object.keys(cur.features || {}).filter((k) => cur.features[k]), add = sp.features.filter((k) => !curOn.includes(k)), del = curOn.filter((k) => !sp.features.includes(k)), keep = sp.features.filter((k) => curOn.includes(k));
+    const ev = planEval({ ...sp, features: sp.features });
+    return `<div class="pa-plan"><h4>${esc(cur.name)} ${tag(ev.status)}</h4><div class="muted" style="margin-top:2px">${esc(sp.tagline || "")}</div>
+      <table class="pa-cmp"><tr><td></td><td class="muted">目前</td><td class="muted">建議</td></tr>${cmp("月費", cur.price_month, sp.price_month, true)}${cmp("年費", cur.price_year, sp.price_year, true)}${cmp("包含老師", cur.seats, sp.seats)}${cmp("加購 1 位／月", cur.extra_seat_price, sp.extra_seat_price, true)}${cmp("每月 AI 點數", cur.ai_points, sp.ai_points)}<tr><td>預估毛利</td><td colspan="2">${n(ev.margin)}（${Math.round(ev.pct * 100)}%）・最壞情況 ${n(ev.worst)}</td></tr></table>
+      <div class="muted">開通功能（${sp.features.length} 項）</div><div class="pa-chips">${add.map((k) => `<span class="add">＋${esc(FEATURES[k] || k)}</span>`).join("")}${del.map((k) => `<span class="del">${esc(FEATURES[k] || k)}</span>`).join("")}${keep.map((k) => `<span>${esc(FEATURES[k] || k)}</span>`).join("")}</div>
+      ${(sp.highlights || []).length ? `<ul class="pa-hl">${sp.highlights.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : ""}
+      <details><summary>為什麼這樣建議（含成本算式）</summary><p>${esc(sp.why || "")}</p></details>
+      <div class="acts" style="margin-top:8px"><button class="btn s" data-paapply="${esc(sp.id)}">套用到「${esc(cur.name)}」</button></div></div>`;
+  }).join("");
+  const tops = (res.topups || []);
+  return `<div class="card">${head}${stale && !PLAN_AI_BUSY ? `<div class="pa-busy">功能有變動，這份建議是舊的。按「重新分析」更新。</div>` : ""}
+    <p class="pa-sum">${esc(res.summary || "")}</p>${plans}
+    ${tops.length ? `<div class="pa-plan"><h4>AI 點數加購包</h4><table class="pa-cmp"><tr><td></td><td class="muted">點數</td><td class="muted">售價（每點）</td></tr>${tops.map((t) => `<tr><td>${esc(t.name)}</td><td>${t.points} 點</td><td>${n(t.price)}（${t.points ? Math.round((t.price / t.points) * 10) / 10 : 0}）</td></tr>`).join("")}</table><p class="muted" style="white-space:pre-wrap;line-height:1.7;margin:4px 0 0">${esc(res.topupWhy || "")}</p><div class="acts" style="margin-top:8px"><button class="btn s" data-paapply="topups">套用加購包</button></div></div>` : ""}
+    ${(res.warnings || []).length ? `<div class="pa-plan" style="background:#fff8ec"><h4>⚠️ 要注意</h4><ul class="pa-hl">${res.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
+    <div class="acts" style="margin-top:10px"><button class="btn" data-paapply="all">全部套用</button></div>
+    <p class="muted" style="margin:8px 0 0">套用後會直接改方案設定：已經訂閱的老師，功能會立刻跟著變；價格從下次付款開始適用。套用前可以先看下面各方案的設定，也可以套用後再手動微調。</p></div>`;
+}
+async function applyPlanAI(which) {
+  const res = D.settings.plan_ai_advice?.result; if (!res) return;
+  const list = which === "all" ? res.plans : which === "topups" ? [] : res.plans.filter((p) => p.id === which);
+  const doTops = which === "all" || which === "topups";
+  const names = list.map((sp) => D.plans.find((p) => p.id === sp.id)?.name).filter(Boolean);
+  if (!confirm(`確定套用 AI 建議到${[...names.map((x) => "「" + x + "」"), doTops ? "加購包" : ""].filter(Boolean).join("、")}嗎？\n已經訂閱的老師，功能會立刻跟著改。`)) return;
+  for (const sp of list) {
+    const cur = D.plans.find((p) => p.id === sp.id); if (!cur) continue;
+    const p = { ...cur, description: sp.tagline || cur.description, price_month: sp.price_month, price_year: sp.price_year, seats: sp.seats, extra_seat_price: sp.extra_seat_price, ai_points: sp.ai_points, features: Object.fromEntries(Object.keys(FEATURES).map((k) => [k, sp.features.includes(k)])) };
+    const { error } = await SB.rpc("admin_save_plan", { p }); if (error) return toast("套用失敗：" + error.message);
+  }
+  if (doTops && (res.topups || []).length) { const { error } = await SB.rpc("admin_save_setting", { p_key: "topups", p_value: res.topups.map((t) => ({ name: t.name, points: t.points, price: t.price })) }); if (error) return toast("套用加購包失敗：" + error.message); }
+  toast("已套用 AI 建議"); load();
+}
 const roundPrice = (v) => { if (v <= 0) return 0; const r = v < 100 ? 10 : v < 1000 ? 50 : 100; return Math.ceil((v + 1) / r) * r - 1; };
 function adviceHTML() {
   const A = advSettings(), M = costModel(), fixedTotal = A.fixed.reduce((a, f) => a + (+f.amount || 0), 0);
@@ -261,7 +348,7 @@ function wsHTML() {
   return `<input class="search" id="q" placeholder="搜尋班級或建立者" value="${esc(q)}"><p class="muted" style="margin:0 0 8px">班級沒有自己的方案時，會跟隨建立者的個人方案。要讓班級超過 3 位老師，在「方案設定」把人數調高，或記錄一筆加購人數的付款。</p><div class="card tw"><table><thead><tr><th>班級</th><th>建立者</th><th>老師人數</th><th>班級方案</th><th>AI 30 天</th><th></th></tr></thead><tbody>${list.map((w) => { const os = D.users.find((u) => u.id === w.owner_id)?.sub; return `<tr><td><b>${esc(w.name)}</b><div class="muted">${fd(w.created_at)}</div></td><td>${esc(w.owner || "")}</td><td>${w.members} 位${w.pending ? `<div class="muted">${w.pending} 位待核准</div>` : ""}</td><td>${w.sub ? subTag(w.sub) : `${subTag(null, true)}<div style="margin-top:4px">${os ? subTag(os) : ""}</div>`}</td><td>${w.ai_30d} 點</td><td><div class="acts"><button class="btn s" data-pay="workspace|${w.id}">記錄付款</button><button class="btn o s" data-sub="workspace|${w.id}">方案設定</button>${w.sub ? `<button class="btn o s" data-pts="workspace|${w.id}">加點數</button>` : ""}</div></td></tr>`; }).join("")}</tbody></table>${list.length ? "" : '<div class="empty">沒有符合的班級</div>'}</div>`;
 }
 function plansHTML() {
-  return `<p class="muted" style="margin:0 0 8px">改好按「保存」，前台的方案頁和權限會立刻更新。「公開」打勾的方案才會出現在老師看到的方案頁。</p>${D.plans.map((p, i) => planForm(p, i)).join("")}<button class="btn o" data-newplan="1">＋ 新增方案</button>`;
+  return planAIHTML() + `<p class="muted" style="margin:0 0 8px">改好按「保存」，前台的方案頁和權限會立刻更新。「公開」打勾的方案才會出現在老師看到的方案頁。</p>${D.plans.map((p, i) => planForm(p, i)).join("")}<button class="btn o" data-newplan="1">＋ 新增方案</button>`;
 }
 function planForm(p, i) {
   return `<div class="card" data-plan="${i}"><div class="row"><label class="f">方案代碼（英文）<input data-pf="id" value="${esc(p.id)}" ${p._new ? "" : "readonly"}></label><label class="f">方案名稱<input data-pf="name" value="${esc(p.name)}"></label><label class="f">排序<input data-pf="sort" type="number" value="${p.sort || 0}"></label><label class="f" style="align-self:end"><span><input type="checkbox" data-pf="public" ${p.public ? "checked" : ""} style="width:auto"> 公開</span></label></div>
@@ -308,6 +395,8 @@ function bind() {
   document.querySelectorAll("[data-sub]").forEach((b) => b.onclick = () => subDialog(...b.dataset.sub.split("|")));
   document.querySelectorAll("[data-pts]").forEach((b) => b.onclick = () => ptsDialog(...b.dataset.pts.split("|")));
   document.querySelectorAll("[data-adm]").forEach((b) => b.onclick = async () => { const [id, on] = b.dataset.adm.split("|"); if (!confirm(on === "1" ? "確定讓這位老師也能進後台嗎？" : "確定取消這位老師的管理員權限嗎？")) return; const { error } = await SB.rpc("admin_set_admin", { p_user: id, p_on: on === "1" }); if (error) return toast(error.message); toast("已更新"); load(); });
+  document.querySelectorAll("[data-planai]").forEach((b) => b.onclick = () => runPlanAI(false));
+  document.querySelectorAll("[data-paapply]").forEach((b) => b.onclick = () => applyPlanAI(b.dataset.paapply));
   document.querySelectorAll("[data-saveplan]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-plan]"), p = {}; box.querySelectorAll("[data-pf]").forEach((el) => p[el.dataset.pf] = el.type === "checkbox" ? el.checked : el.value.trim()); p.features = {}; box.querySelectorAll("[data-feat]").forEach((el) => p.features[el.dataset.feat] = el.checked); if (!/^[a-z0-9_-]{2,20}$/.test(p.id)) return toast("方案代碼請用 2～20 個英文小寫、數字"); if (!p.name) return toast("請填方案名稱"); const { error } = await SB.rpc("admin_save_plan", { p }); if (error) return toast("保存失敗：" + error.message); toast("方案已保存"); load(); });
   document.querySelectorAll("[data-delplan]").forEach((b) => b.onclick = async () => { if (!confirm("確定刪除這個方案嗎？")) return; const { error } = await SB.rpc("admin_delete_plan", { p_id: b.dataset.delplan }); if (error) return toast(/plan_in_use/.test(error.message) ? "還有老師在用這個方案，不能刪除；可以取消「公開」讓新老師看不到" : error.message); toast("已刪除"); load(); });
   document.querySelectorAll("[data-newplan]").forEach((b) => b.onclick = () => { D.plans.push({ _new: true, id: "", name: "", description: "", price_month: 0, price_year: 0, seats: 1, extra_seat_price: 0, ai_points: 0, features: Object.fromEntries(Object.keys(FEATURES).map((k) => [k, true])), public: false, sort: D.plans.length + 1 }); render(); });

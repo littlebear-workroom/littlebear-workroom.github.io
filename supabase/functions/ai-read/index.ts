@@ -17,7 +17,45 @@ const obj = (props: Record<string, unknown>) => ({ type: "object", properties: p
 const arr = (items: unknown) => ({ type: "array", items });
 const slot = obj({ start: { ...str, description: "HH:MM 24-hour" }, end: { ...str, description: "HH:MM 24-hour, empty if not shown" }, name: str });
 
-const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textOnly?: boolean; effort?: string }> = {
+const int = { type: "integer" };
+const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textOnly?: boolean; effort?: string; adminOnly?: boolean }> = {
+  // admin back office: design the plan ladder (features per plan + prices). Not charged to points.
+  planAdvice: {
+    textOnly: true,
+    adminOnly: true,
+    effort: "high",
+    schema: obj({
+      summary: { ...str, description: "overall strategy in Traditional Chinese, 3-6 sentences: how the three plans differ and why people will upgrade" },
+      plans: arr(obj({
+        id: { type: "string", enum: ["personal", "class", "ai"] },
+        tagline: { ...str, description: "one-line plan description shown to teachers, Traditional Chinese, <= 30 字" },
+        price_month: int, price_year: int, seats: int, extra_seat_price: int, ai_points: int,
+        features: arr({ ...str, description: "feature key from the list" }),
+        highlights: arr({ ...str, description: "selling point shown on the plan card, <= 18 字" }),
+        why: { ...str, description: "why these features and prices, with the margin math, Traditional Chinese" },
+      })),
+      topups: arr(obj({ name: str, points: int, price: int })),
+      topupWhy: { ...str, description: "why these top-up prices keep upgrading more attractive than topping up" },
+      warnings: arr({ ...str, description: "risks or things the owner should check, Traditional Chinese" }),
+    }),
+    task: (c) =>
+      `你是 SaaS 訂閱定價顧問。產品是「小熊工作室」：給臺灣幼兒園教保服務人員（老師）用的工作管理 App，用 LINE 登入，有 7 天免費體驗，到期後唯讀。老師多半自費訂閱，對價格敏感，習慣 99/149/199/299/399/499 這類價格；年繳通常約 10 個月的價錢（送 2 個月）。\n\n` +
+      `老闆的問題：目前三個付費方案的功能幾乎一樣，主要只差每月 AI 點數，老師會選最便宜的方案、點數不夠再加購，進階方案沒有吸引力。請重新設計三個付費方案（個人版 personal、班級協作版 class、AI 進階協作版 ai）：\n` +
+      `1. 用「功能」拉開差距，形成清楚的升級階梯：每一層都要有下一層才有、而且老師真的會想要的功能；不要只靠點數區分。核心日常功能（待辦、行事曆等）各方案都保留，讓個人版仍然好用。\n` +
+      `2. 個人版是一個人用：seats 1，不含班級共享（team）。只有開了 team 的方案，班級資料才能多人同步，所以「需要多人共用才有意義」的功能（例如全園班表與代班、請假交接通知同班老師）請考慮放在協作版以上。\n` +
+      `3. AI：AI 總開關是 feature「ai」，某方案沒有 ai 就完全不能用 AI。每個 AI 工作屬於某個功能（見下方），方案沒有那個功能就用不到那個 AI 工作。請決定各方案每月 AI 點數。\n` +
+      `4. 加購點數：讓加購的每點價格明顯高於進階方案內含點數的每點價值，讓「常用 AI 的人升級比一直加購划算」；但仍保留加購給偶爾不夠用的人。\n` +
+      `5. 成本與毛利：每個方案在「老師用掉預估比例點數」時要達到目標毛利，在「點數全部用在最貴的 AI 工作」的最壞情況下不能賠錢。請用下面的成本數字實際算，並在 why 裡寫出算式（月費、AI 成本、手續費、固定成本分攤、毛利）。\n` +
+      `6. 價格要符合臺灣老師的接受度，不要因為加了功能就漲到不合理；可以調整月費、年費、人數、加購人數價格、點數。\n` +
+      `7. features 只能用下方列出的 key，請列出該方案「開通」的全部 key（包含 ai、team 如果要開）。\n\n` +
+      `【全部功能】\n${(c.features || []).map((f: any) => `- ${f.key}｜${f.name}｜${f.desc || ""}${f.ai?.length ? `｜含 AI：${f.ai.join("、")}` : ""}`).join("\n")}\n\n` +
+      `【AI 工作】（每次扣點、每次實際成本 NT$）\n${(c.aiKinds || []).map((k: any) => `- ${k.name}（屬於 ${k.feature}）：扣 ${k.points} 點，每次約 NT$${k.costNT}${k.calls ? `，近 30 天 ${k.calls} 次` : ""}`).join("\n")}\n\n` +
+      `【目前方案】\n${(c.plans || []).map((p: any) => `- ${p.id} ${p.name}：月費 ${p.price_month}、年費 ${p.price_year}、含 ${p.seats} 位老師、加 1 位每月 ${p.extra_seat_price}、每月 ${p.ai_points} 點、開通：${p.features.join(",")}${p.subscribers != null ? `、目前付費 ${p.subscribers} 位` : ""}`).join("\n")}\n\n` +
+      `【目前加購包】\n${(c.topups || []).map((t: any) => `- ${t.name}：${t.points} 點 NT$${t.price}`).join("\n") || "（沒有）"}\n\n` +
+      `【成本假設】每點 AI 平均成本 NT$${c.cost?.avgPerPoint}；最貴的 AI 工作每點 NT$${c.cost?.worstPerPoint}；金流/轉帳手續費 ${c.cost?.fee}%；目標毛利 ${c.cost?.margin}%；預估老師平均用掉 ${c.cost?.usage}% 點數；每月固定成本 NT$${c.cost?.fixedMonthly}，每位付費用戶分攤 NT$${c.cost?.fixedShare}。\n` +
+      `【使用者】老師帳號 ${c.stats?.teachers ?? "?"} 位、付費中 ${c.stats?.paying ?? "?"} 位。\n\n` +
+      `請回傳三個方案（personal、class、ai 各一）、加購包建議（2～3 個）、整體策略說明，以及需要老闆注意的風險。全部用繁體中文。`,
+  },
   bus: {
     textOnly: true,
     effort: "medium",
@@ -169,6 +207,11 @@ Deno.serve(async (req) => {
     const images: { media_type: string; data: string }[] = (body.images || []).slice(0, 4);
     if (!images.length && !kind.textOnly) return json({ error: "沒有收到圖片" }, 400);
     if (!Deno.env.get("ANTHROPIC_API_KEY")) return json({ error: "AI 讀圖還沒設定好", fallback: true }, 503);
+    let charge: any = { ok: true, cost: 0, left: null }, refund = async () => {};
+    if (kind.adminOnly) {
+      const { data: isAdmin } = await admin.from("admins").select("user_id").eq("user_id", u.user.id).maybeSingle();
+      if (!isAdmin) return json({ error: "forbidden" }, 403);
+    } else {
 
     // safety cap per teacher per day (independent of plan points)
     const day = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
@@ -176,14 +219,15 @@ Deno.serve(async (req) => {
     if ((use?.count || 0) >= DAILY_LIMIT) return json({ error: `今天已經用 AI ${DAILY_LIMIT} 次了，明天再試`, fallback: true }, 429);
     // plan points: charged before calling the AI, refunded if it does not finish
     const wsId = typeof body.ws === "string" && /^[0-9a-f-]{36}$/.test(body.ws) ? body.ws : null;
-    const { data: charge, error: chErr } = await admin.rpc("ai_consume", { p_user: u.user.id, p_ws: wsId, p_kind: body.kind });
+    const { data: ch, error: chErr } = await admin.rpc("ai_consume", { p_user: u.user.id, p_ws: wsId, p_kind: body.kind }); charge = ch;
     if (chErr) return json({ error: "AI 點數檢查失敗，請稍後再試", fallback: true }, 500);
     if (!charge?.ok) {
       const why: Record<string, string> = { readonly: "方案已到期，AI 功能暫停。續約後就能繼續使用", no_ai: "目前的方案沒有包含 AI 功能", no_points: `AI 點數不夠了（這次需要 ${charge?.cost} 點，剩 ${charge?.left} 點），可以加購點數`, no_plan: "還沒有可用的方案" };
       return json({ error: why[charge?.error] || "沒有 AI 點數", fallback: true, code: charge?.error }, 402);
     }
     await admin.from("ai_usage").upsert({ user_id: u.user.id, day, count: (use?.count || 0) + 1 });
-    const refund = () => admin.rpc("ai_refund", { p_subject_type: charge.subject_type, p_subject_id: charge.subject_id, p_points: charge.cost, p_user: u.user.id });
+    refund = async () => { await admin.rpc("ai_refund", { p_subject_type: charge.subject_type, p_subject_id: charge.subject_id, p_points: charge.cost, p_user: u.user.id }); };
+    }
 
     const client = new Anthropic();
     const content: any[] = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.media_type, data: im.data } }));
@@ -214,7 +258,7 @@ Deno.serve(async (req) => {
     let data: unknown;
     try { data = JSON.parse(text); } catch { await refund(); return json({ error: "AI 回傳的格式不正確，請再試一次", fallback: true }, 502); }
     const d: any = data;
-    if (charge.ledger_id) await admin.rpc("ai_record_cost", { p_id: charge.ledger_id, p_in: response.usage?.input_tokens || 0, p_out: response.usage?.output_tokens || 0 });
+    if (charge?.ledger_id) await admin.rpc("ai_record_cost", { p_id: charge.ledger_id, p_in: response.usage?.input_tokens || 0, p_out: response.usage?.output_tokens || 0 });
     console.log(JSON.stringify({ kind: body.kind, images: images.length, in: response.usage?.input_tokens, out: response.usage?.output_tokens, items: (d.events || d.rows || d.slots || d.weeks || d.suggestions || []).length }));  // counts only: never log what was read (it can contain children's names)
     return json({ ok: true, data, points: { cost: charge.cost, left: charge.left }, usage: { input: response.usage?.input_tokens, output: response.usage?.output_tokens } });
   } catch (e) {

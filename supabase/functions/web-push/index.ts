@@ -23,6 +23,7 @@ const LABELS: Record<string, [string, string]> = {
   bear_afterschool: ["課後才藝", "afterschool"],
   bear_bus_routes: ["娃娃車車次", "bus"],
   bear_bus_riders: ["娃娃車名單", "bus"],
+  bear_attendance: ["出缺勤點名", "attendance"],
   bear_fund_records: ["班費紀錄", "funds"],
   bear_fund_types: ["班級資金分類", "funds"],
   bear_teacher_map: ["老師名單", "roster"],

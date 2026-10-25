@@ -12,7 +12,7 @@
     vapidKey: "BM2rjrxMX-qgEIz8rnOkN_gC1aywURPYw9tZ0Jdoo08sjg0sSwAQMCRnyKQlIXkxjMmsbxARBMVO02_IZG1sYHY", // phone notifications
   };
   // Data the whole class shares vs. data that belongs to one teacher.
-  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_afterschool", "bear_bus_routes", "bear_bus_riders", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
+  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_afterschool", "bear_bus_routes", "bear_bus_riders", "bear_attendance", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
   const PERSONAL = ["bear_tasks", "bear_trainings", "bear_training_cycle", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans"];
   // Read before LINE's SDK tidies up the address bar: set when the login was started from the home-screen app.
   const BOOT_PAIR = (() => {
@@ -609,8 +609,8 @@
   // ---------- boot ----------
   // ---------- plan / subscription ----------
   let access = null, catalog = null, roWarned = false;
-  const FEATURE_OF_VIEW = { funds: "funds", supplies: "supplies", forms: "forms", students: "students", roster: "roster", routine: "routine", chores: "chores", tasks: "tasks", schedule: "schedule", lessons: "lessons", motor: "motor", training: "training", calendar: "calendar", afterschool: "afterschool", bus: "bus", files: "indicators", team: "team" };
-  const FEATURE_NAMES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", team: "班級共享（多位老師）", ai: "AI 小幫手" };
+  const FEATURE_OF_VIEW = { funds: "funds", supplies: "supplies", forms: "forms", students: "students", roster: "roster", routine: "routine", chores: "chores", tasks: "tasks", schedule: "schedule", lessons: "lessons", motor: "motor", training: "training", calendar: "calendar", afterschool: "afterschool", bus: "bus", files: "indicators", team: "team", attendance: "attendance", logs: "logs" };
+  const FEATURE_NAMES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", attendance: "出缺勤點名", logs: "週誌月報", team: "班級共享（多位老師）", ai: "AI 小幫手" };
   const isRO = () => !!(access && access.state === "readonly");
   const hasFeature = (f) => !access || access.state === "guest" || !access.features || access.features[f] !== false && (access.features[f] === true || access.features[f] === undefined);
   async function loadAccess() { if (!sb || !user) return null; try { const { data, error } = await sb.rpc("my_access", { p_ws: ws ? ws.id : null }); if (!error) access = data; } catch (e) { console.warn(e); } window.bearAccess = access; return access; }

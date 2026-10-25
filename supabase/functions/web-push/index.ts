@@ -25,6 +25,7 @@ const LABELS: Record<string, [string, string]> = {
   bear_bus_riders: ["娃娃車名單", "bus"],
   bear_attendance: ["出缺勤點名", "attendance"],
   bear_leaves: ["請假與代班交接", "leave"],
+  bear_leave_plan: ["請假行事曆", "leaveplan"],
   bear_fund_records: ["班費紀錄", "funds"],
   bear_fund_types: ["班級資金分類", "funds"],
   bear_teacher_map: ["老師名單", "roster"],

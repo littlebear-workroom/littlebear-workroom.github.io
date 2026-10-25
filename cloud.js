@@ -12,8 +12,8 @@
     vapidKey: "BM2rjrxMX-qgEIz8rnOkN_gC1aywURPYw9tZ0Jdoo08sjg0sSwAQMCRnyKQlIXkxjMmsbxARBMVO02_IZG1sYHY", // phone notifications
   };
   // Data the whole class shares vs. data that belongs to one teacher.
-  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_afterschool", "bear_bus_routes", "bear_bus_riders", "bear_attendance", "bear_leaves", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
-  const PERSONAL = ["bear_tasks", "bear_trainings", "bear_training_cycle", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans"];
+  const SHARED = ["bear_student_records", "bear_forms", "bear_fund_records", "bear_fund_types", "bear_afterschool", "bear_bus_routes", "bear_bus_riders", "bear_attendance", "bear_leaves", "bear_leave_plan", "bear_teacher_map", "bear_roster_rows", "bear_sub_records", "bear_routine", "bear_motor_days", "bear_motor_plans", "bear_lessons", "bear_lesson_themes"];
+  const PERSONAL = ["bear_tasks", "bear_trainings", "bear_training_cycle", "bear_schedules", "bear_profile", "bear_chores", "bear_notify_prefs", "bear_file_note", "bear_cal_events", "bear_cal_plans", "bear_leave_private"];
   // Read before LINE's SDK tidies up the address bar: set when the login was started from the home-screen app.
   const BOOT_PAIR = (() => {
     // LINE may wrap our address several times (liff.state, liffRedirectUri…), so unwrap and search all of it.
@@ -780,7 +780,7 @@
     };
   }
   // ---------- class change history ----------
-  const KEY_NAMES = { bear_student_records: "學生名冊／寶貝補給品", bear_forms: "回條小幫手", bear_fund_records: "班級資金", bear_fund_types: "班級資金分類", bear_afterschool: "課後才藝", bear_bus_routes: "娃娃車車次", bear_bus_riders: "娃娃車名單", bear_teacher_map: "老師名單", bear_roster_rows: "全園班表", bear_sub_records: "代班紀錄", bear_routine: "班級作息表", bear_motor_days: "大肌肉活動", bear_motor_plans: "大肌肉活動規劃", bear_lessons: "教案花園", bear_lesson_themes: "教案主題", bear_attendance: "出缺勤", bear_logs: "週誌月報", bear_leaves: "請假與代班交接" };
+  const KEY_NAMES = { bear_student_records: "學生名冊／寶貝補給品", bear_forms: "回條小幫手", bear_fund_records: "班級資金", bear_fund_types: "班級資金分類", bear_afterschool: "課後才藝", bear_bus_routes: "娃娃車車次", bear_bus_riders: "娃娃車名單", bear_teacher_map: "老師名單", bear_roster_rows: "全園班表", bear_sub_records: "代班紀錄", bear_routine: "班級作息表", bear_motor_days: "大肌肉活動", bear_motor_plans: "大肌肉活動規劃", bear_lessons: "教案花園", bear_lesson_themes: "教案主題", bear_attendance: "出缺勤", bear_logs: "週誌月報", bear_leaves: "請假與代班交接", bear_leave_plan: "請假行事曆" };
   async function openHistory(box) {
     if (!ws) return;
     box.hidden = false; box.innerHTML = '<p class="small-note">載入中…</p>';

@@ -72,13 +72,15 @@ function activeChores(list: Chore[], T: string) {
 type Data = { tasks?: any[]; chores?: Chore[]; cal?: any[]; prefs?: any };
 function dailyText(d: Data, T: string, withTomorrow: boolean) {
   const tasks = (d.tasks || []).filter((t) => t.date === T && !t.done);
+  const overdue = (d.tasks || []).filter((t) => !t.done && t.date && t.date < T && t.date >= addDays(T, -60)).sort((a, b) => a.date.localeCompare(b.date));
   const chores = activeChores(d.chores || [], T);
   const cal = (d.cal || []).filter((e) => e.mine && !e.monthOnly && (e.date === T || (e.end && e.date <= T && T <= e.end)));
   const tm = addDays(T, 1);
   const tTasks = withTomorrow ? (d.tasks || []).filter((t) => t.date === tm && !t.done) : [];
   const tCal = withTomorrow ? (d.cal || []).filter((e) => e.mine && !e.monthOnly && e.date === tm) : [];
-  if (!tasks.length && !chores.length && !cal.length && !tTasks.length && !tCal.length) return "";
+  if (!tasks.length && !overdue.length && !chores.length && !cal.length && !tTasks.length && !tCal.length) return "";
   const L: string[] = [`小熊工作提醒 ♡ ${md(T)}`];
+  if (overdue.length) L.push("", `⚠ 逾期還沒完成（${overdue.length}），請盡快處理`, ...overdue.slice(0, 8).map((t) => `・${t.title}（原定 ${md(t.date)}，逾期 ${diff(t.date, T)} 天）`), ...(overdue.length > 8 ? [`…還有 ${overdue.length - 8} 件`] : []));
   if (tasks.length) L.push("", `今天還沒完成的待辦（${tasks.length}）`, ...tasks.slice(0, 8).map((t) => `・${t.title}${t.time ? `（${t.time}）` : ""}`), ...(tasks.length > 8 ? [`…還有 ${tasks.length - 8} 件`] : []));
   if (chores.length) L.push("", "例行公事", ...chores.map((o) => { const n = diff(T, o.due); return `・${o.it.title}（${n === 0 ? "今天截止" : n > 0 ? md(o.due) + "前" : `已逾期 ${-n} 天`}）`; }));
   if (cal.length) L.push("", "今天行事曆上你負責的", ...cal.map((e) => `・${e.title}${e.time ? ` ${e.time}` : ""}`));

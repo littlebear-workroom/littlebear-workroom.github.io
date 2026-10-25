@@ -64,13 +64,14 @@ async function load() {
 }
 function render() {
   const pendN = D.payments.filter((p) => p.status === "pending").length;
-  const T = [["home", "總覽"], ["pay", `付款紀錄${pendN ? `（待確認 ${pendN}）` : ""}`], ["usage", "用量與價格"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["set", "設定"]];
+  const T = [["home", "總覽"], ["pay", `付款紀錄${pendN ? `（待確認 ${pendN}）` : ""}`], ["usage", "用量與價格"], ["advice", "價格建議"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["set", "設定"]];
   $("tabs").innerHTML = T.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
   $("tabs").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { tab = b.dataset.t; q = ""; render(); });
   const m = $("main");
   if (tab === "home") m.innerHTML = homeHTML();
   if (tab === "users") m.innerHTML = usersHTML();
   if (tab === "usage") m.innerHTML = usageHTML();
+  if (tab === "advice") m.innerHTML = adviceHTML();
   if (tab === "ws") m.innerHTML = wsHTML();
   if (tab === "plans") m.innerHTML = plansHTML();
   if (tab === "pay") m.innerHTML = payHTML();
@@ -99,6 +100,64 @@ async function detailDialog(type, id) {
   $("dlgNo").onclick = () => $("dlg").close();
   $("dlg").showModal();
 }
+// ---------- pricing advisor ----------
+// measured average cost per call (NT$) used until there is enough real data
+const DEFAULT_CALL_NT = { routine: 0.9, roster: 1, bus: 1, motor: 1, calendar: 3.5, lesson: 0.8, lessonChat: 2.1 };
+const DEFAULT_MIX = { lessonChat: 0.4, lesson: 0.15, routine: 0.1, roster: 0.1, calendar: 0.1, bus: 0.05, motor: 0.1 }; // share of calls
+function advSettings() {
+  const a = D.settings.pricing || {};
+  return { margin: a.margin ?? 40, fee: a.fee ?? 2.8, usage: a.usage ?? 70, subs: a.subs ?? 20, fixed: a.fixed || [{ name: "Supabase Pro 主機", amount: 800 }, { name: "LINE 官方帳號", amount: 0 }, { name: "網址", amount: 50 }] };
+}
+function costModel() {
+  const rate = U.usd_twd || 32, costs = D.settings.ai_costs || {}, bk = U.by_kind || {};
+  const kinds = Object.keys(AI_KINDS).map((k) => {
+    const real = bk[k] && bk[k].calls >= 5, callNT = real ? bk[k].avg * rate : DEFAULT_CALL_NT[k] ?? 1.5, pts = Math.max(1, costs[k] ?? 1);
+    return { k, name: AI_KINDS[k], callNT, pts, perPoint: callNT / pts, real, calls: bk[k]?.calls || 0 };
+  });
+  const totalCalls = Object.values(bk).reduce((a, v) => a + (v.calls || 0), 0), realMix = totalCalls >= 20;
+  const mix = Object.fromEntries(kinds.map((x) => [x.k, realMix ? (bk[x.k]?.calls || 0) / totalCalls : DEFAULT_MIX[x.k] || 0]));
+  // average cost per point, weighted by how points are actually spent
+  let ptsSum = 0, costSum = 0; kinds.forEach((x) => { ptsSum += mix[x.k] * x.pts; costSum += mix[x.k] * x.callNT; });
+  const avgPerPoint = ptsSum ? costSum / ptsSum : 1, worstPerPoint = Math.max(...kinds.map((x) => x.perPoint));
+  return { kinds, mix, realMix, totalCalls, avgPerPoint, worstPerPoint };
+}
+function usageRatio(planId, fallback) {
+  const subs = [...D.users.map((u) => ({ sub: u.sub, use: U.by_user[u.id] })), ...D.workspaces.map((w) => ({ sub: w.sub, use: U.by_ws[w.id] }))].filter((x) => x.sub && x.sub.plan_id === planId && x.sub.status === "active" && left(x.sub.ends_at) > 0);
+  const plan = D.plans.find((p) => p.id === planId);
+  if (subs.length < 3 || !plan || !plan.ai_points) return { ratio: fallback / 100, real: false, n: subs.length };
+  const avg = subs.reduce((a, x) => a + (x.use?.points30 || 0), 0) / subs.length;
+  return { ratio: Math.min(1.5, avg / plan.ai_points), real: true, n: subs.length };
+}
+const roundPrice = (v) => { if (v <= 0) return 0; const r = v < 100 ? 10 : v < 1000 ? 50 : 100; return Math.ceil((v + 1) / r) * r - 1; };
+function adviceHTML() {
+  const A = advSettings(), M = costModel(), fixedTotal = A.fixed.reduce((a, f) => a + (+f.amount || 0), 0);
+  const paying = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter((x) => x && x.status === "active" && left(x.ends_at) > 0 && left(x.ends_at) < 3650).length;
+  const spreadOver = Math.max(paying, A.subs, 1), fixedShare = fixedTotal / spreadOver, fee = A.fee / 100, target = A.margin / 100;
+  const plans = D.plans.filter((p) => p.id !== "trial" && p.price_month > 0);
+  const rows = plans.map((p) => {
+    const ur = usageRatio(p.id, A.usage), aiExp = p.ai_points * ur.ratio * M.avgPerPoint, aiWorst = p.ai_points * M.worstPerPoint;
+    const cost = aiExp + fixedShare + p.price_month * fee, margin = p.price_month - cost, worst = p.price_month - aiWorst - fixedShare - p.price_month * fee;
+    const need = (aiExp + fixedShare) / Math.max(0.05, 1 - fee - target), needWorst = (aiWorst + fixedShare) / Math.max(0.05, 1 - fee);
+    const sugPrice = roundPrice(Math.max(need, needWorst)), sugPts = Math.max(0, Math.floor((p.price_month * (1 - fee - target) - fixedShare) / Math.max(0.01, ur.ratio * M.avgPerPoint)));
+    const status = worst < 0 ? "bad" : margin / p.price_month < target ? "warn" : "ok";
+    return { p, ur, aiExp, aiWorst, cost, margin, worst, sugPrice, sugPts, status, yearly: p.price_year ? p.price_year / 12 : 0 };
+  });
+  const kindRows = M.kinds.map((x) => { const sugPts = Math.max(1, Math.round(x.callNT / Math.max(0.01, M.avgPerPoint))); return { ...x, sugPts, high: x.perPoint > M.avgPerPoint * 1.6 && sugPts > x.pts }; });
+  const tops = (D.settings.topups || []).map((t, i) => { const minP = roundPrice((t.points * M.avgPerPoint) / Math.max(0.05, 1 - fee - target)), worstP = t.points * M.worstPerPoint; return { t, i, minP, worstP, perPoint: t.points ? t.price / t.points : 0, bad: t.price < minP }; });
+  const avgMargin = rows.length ? rows.reduce((a, r) => a + (r.margin + fixedShare), 0) / rows.length : 0, breakEven = avgMargin > 0 ? Math.ceil(fixedTotal / avgMargin) : null;
+  const tag = (st) => st === "bad" ? '<span class="tag t-ro">最壞情況會賠錢</span>' : st === "warn" ? '<span class="tag t-trial">毛利低於目標</span>' : '<span class="tag t-active">健康</span>';
+  const n = (v) => "NT$" + Math.round(v).toLocaleString(), n1 = (v) => "NT$" + (Math.round(v * 10) / 10).toLocaleString();
+  return `<div class="card"><h3 style="margin:0 0 6px;font-size:15px">計算假設</h3><p class="muted" style="margin:0 0 10px">建議會照這些假設計算，改好按「重新計算」。${M.realMix ? `AI 用量比例已改用你系統裡的實際紀錄（近 30 天 ${M.totalCalls} 次）。` : `目前實際 AI 紀錄還不到 20 次，先用預估的使用比例（寫教案約 4 成）。`}</p>
+    <div class="row"><label class="f">目標毛利（%）<input id="aMargin" type="number" min="0" max="90" value="${A.margin}"></label><label class="f">金流／轉帳手續費（%）<input id="aFee" type="number" step="0.1" min="0" value="${A.fee}"></label><label class="f">預估老師用掉幾成點數（%）<input id="aUsage" type="number" min="0" max="150" value="${A.usage}"></label><label class="f">固定成本預計分攤給幾位付費用戶<input id="aSubs" type="number" min="1" value="${A.subs}"></label></div>
+    <div class="muted" style="margin:4px 0 6px">每月固定成本（NT$）</div><div id="aFixed">${A.fixed.map((f, i) => `<div class="row" data-fx="${i}" style="margin-bottom:6px"><label class="f">項目<input data-fxn value="${esc(f.name)}"></label><label class="f">每月金額<input data-fxa type="number" value="${f.amount}"></label><button class="btn o s" data-fxdel="${i}" style="align-self:end">刪除</button></div>`).join("")}</div>
+    <div class="acts"><button class="btn o s" data-fxadd="1">＋ 新增固定成本</button><button class="btn" data-advsave="1">重新計算並保存假設</button></div></div>
+  <div class="grid"><div class="stat"><small>每點 AI 平均成本</small><b>${n1(M.avgPerPoint)}</b><div class="muted">最貴的工作每點 ${n1(M.worstPerPoint)}</div></div><div class="stat"><small>每月固定成本</small><b>${n(fixedTotal)}</b><div class="muted">每位付費用戶分攤 ${n(fixedShare)}（以 ${spreadOver} 位計）</div></div><div class="stat"><small>目前付費用戶</small><b>${paying}</b><div class="muted">${breakEven ? `大約 ${breakEven} 位付費用戶可以打平固定成本` : "目前方案平均賺不到錢，請先調整價格"}</div></div></div>
+  <div class="card tw" style="margin-top:12px"><h3 style="margin:0 0 6px;font-size:15px">各方案每月損益（每一位付費用戶）</h3><table><thead><tr><th>方案</th><th>月費</th><th>預估 AI 成本</th><th>手續費＋固定分攤</th><th>預估毛利</th><th>最壞情況</th><th>建議</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${esc(r.p.name)}</b><div>${tag(r.status)}</div><div class="muted">${r.p.ai_points} 點／月・${r.ur.real ? `實際平均用掉 ${Math.round(r.ur.ratio * 100)}%（${r.ur.n} 位）` : `假設用掉 ${Math.round(r.ur.ratio * 100)}%`}</div></td><td>${n(r.p.price_month)}${r.yearly ? `<div class="muted">年繳換算 ${n(r.yearly)}／月</div>` : ""}</td><td>${n(r.aiExp)}</td><td>${n(r.p.price_month * fee + fixedShare)}</td><td style="color:${r.margin < 0 ? "var(--bad)" : "var(--sage)"};font-weight:700">${n(r.margin)}<div class="muted">${Math.round((r.margin / r.p.price_month) * 100)}%</div></td><td style="color:${r.worst < 0 ? "var(--bad)" : "inherit"}">${n(r.worst)}<div class="muted">點數全用在最貴的工作</div></td><td>${r.status === "ok" ? '<span class="muted">維持目前價格</span>' : `<div>月費調成 <b>${n(r.sugPrice)}</b></div><div class="muted">或每月點數降到 <b>${r.sugPts}</b> 點</div>`}</td><td><div class="acts">${r.status !== "ok" ? `<button class="btn s" data-applyprice="${esc(r.p.id)}|${r.sugPrice}">套用建議月費</button><button class="btn o s" data-applypts="${esc(r.p.id)}|${r.sugPts}">套用建議點數</button>` : ""}</div></td></tr>`).join("")}</tbody></table>
+    <p class="muted" style="margin:8px 0 0">「最壞情況」是假設老師把點數全部用在每點成本最高的工作。只要最壞情況不賠錢，就不怕重度使用的老師。建議月費取「達到目標毛利」和「最壞情況不賠錢」兩者中比較高的價格。年繳價格請照比例一起調整。</p></div>
+  <div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">每種 AI 工作扣幾點</h3><table style="min-width:560px"><thead><tr><th>AI 工作</th><th>每次成本</th><th>目前扣點</th><th>每點成本</th><th>建議扣點</th><th></th></tr></thead><tbody>${kindRows.map((x) => `<tr><td>${esc(x.name)}${x.real ? `<div class="muted">實際 ${x.calls} 次平均</div>` : '<div class="muted">預估值</div>'}</td><td>${n1(x.callNT)}</td><td>${x.pts} 點</td><td style="color:${x.high ? "var(--bad)" : "inherit"}">${n1(x.perPoint)}</td><td>${x.high ? `<b>${x.sugPts} 點</b>` : '<span class="muted">合適</span>'}</td><td>${x.high ? `<button class="btn s" data-applycost="${x.k}|${x.sugPts}">套用</button>` : ""}</td></tr>`).join("")}</tbody></table><p class="muted" style="margin:8px 0 0">紅字代表這種工作每點的成本明顯比平均高，老師一直用它會吃掉你的毛利，建議多扣幾點。</p></div>
+  ${tops.length ? `<div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">AI 點數加購包</h3><table style="min-width:560px"><thead><tr><th>加購包</th><th>目前售價</th><th>每點售價</th><th>建議最低售價</th><th>最壞情況成本</th><th></th></tr></thead><tbody>${tops.map((x) => `<tr><td><b>${esc(x.t.name || "")}</b><div class="muted">${x.t.points} 點</div></td><td>${n(x.t.price)}</td><td>${n1(x.perPoint)}</td><td style="color:${x.bad ? "var(--bad)" : "inherit"};font-weight:${x.bad ? 700 : 400}">${n(x.minP)}</td><td>${n(x.worstP)}</td><td>${x.bad ? `<button class="btn s" data-applytop="${x.i}|${x.minP}">套用</button>` : '<span class="muted">合適</span>'}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+}
+async function applySetting(key, value, msg) { const { error } = await SB.rpc("admin_save_setting", { p_key: key, p_value: value }); if (error) return toast("失敗：" + error.message); toast(msg); load(); }
 function homeHTML() {
   const subs = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter(Boolean);
   const act = subs.filter((s) => left(s.ends_at) > 0 && s.status === "active").length, tri = subs.filter((s) => left(s.ends_at) > 0 && s.status === "trial").length, ro = subs.filter((s) => left(s.ends_at) <= 0).length;
@@ -148,6 +207,12 @@ function setHTML() {
   <div class="card"><h3 style="margin:0 0 10px;font-size:15px">付款補充說明（選填，顯示在銀行帳戶下面）</h3><textarea id="sPay">${esc(typeof s.pay_note === "string" ? s.pay_note : "")}</textarea><button class="btn" data-saveset="pay" style="margin-top:8px">保存</button></div>`;
 }
 function bind() {
+  document.querySelectorAll("[data-fxadd]").forEach((b) => b.onclick = () => { const A = advSettings(); A.fixed.push({ name: "", amount: 0 }); D.settings.pricing = A; render(); });
+  document.querySelectorAll("[data-fxdel]").forEach((b) => b.onclick = () => { const A = advSettings(); A.fixed.splice(+b.dataset.fxdel, 1); D.settings.pricing = A; render(); });
+  document.querySelectorAll("[data-advsave]").forEach((b) => b.onclick = () => { const v = { margin: +$("aMargin").value || 0, fee: +$("aFee").value || 0, usage: +$("aUsage").value || 0, subs: Math.max(1, +$("aSubs").value || 1), fixed: [...document.querySelectorAll("[data-fx]")].map((r) => ({ name: r.querySelector("[data-fxn]").value.trim(), amount: +r.querySelector("[data-fxa]").value || 0 })).filter((f) => f.name || f.amount) }; applySetting("pricing", v, "已重新計算"); });
+  document.querySelectorAll("[data-applyprice],[data-applypts]").forEach((b) => b.onclick = async () => { const isPrice = !!b.dataset.applyprice, [id, val] = (b.dataset.applyprice || b.dataset.applypts).split("|"), p = { ...D.plans.find((x) => x.id === id) }; if (!confirm(isPrice ? `把「${p.name}」月費改成 NT$${val}？（已經付款的老師不受影響，年繳價格請另外調整）` : `把「${p.name}」每月點數改成 ${val} 點？（下個月起生效）`)) return; if (isPrice) p.price_month = +val; else p.ai_points = +val; delete p.updated_at; const { error } = await SB.rpc("admin_save_plan", { p }); if (error) return toast("失敗：" + error.message); toast("已套用"); load(); });
+  document.querySelectorAll("[data-applycost]").forEach((b) => b.onclick = () => { const [k, v] = b.dataset.applycost.split("|"); if (!confirm(`把「${AI_KINDS[k]}」改成每次扣 ${v} 點？`)) return; applySetting("ai_costs", { ...(D.settings.ai_costs || {}), [k]: +v }, "已套用"); });
+  document.querySelectorAll("[data-applytop]").forEach((b) => b.onclick = () => { const [i, v] = b.dataset.applytop.split("|"), t = [...(D.settings.topups || [])]; if (!confirm(`把「${t[+i].name}」售價改成 NT$${v}？`)) return; t[+i] = { ...t[+i], price: +v }; applySetting("topups", t, "已套用"); });
   document.querySelectorAll("[data-t2]").forEach((b) => b.onclick = () => { tab = b.dataset.t2; render(); });
   const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }
   document.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => payDialog(...b.dataset.pay.split("|")));

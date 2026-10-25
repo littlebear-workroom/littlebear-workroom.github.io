@@ -47,7 +47,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const FEATURES = { tasks: "待辦清單", schedule: "班表管理", lessons: "教案花園", training: "研習任務", calendar: "行事曆", chores: "例行公事", funds: "班級資金", supplies: "寶貝補給品", forms: "回條小幫手", students: "學生名冊", roster: "全園班表與代班", routine: "班級作息表", motor: "大肌肉活動", afterschool: "課後才藝", bus: "娃娃車名單", indicators: "幼兒學習指標", team: "班級共享（多位老師）", ai: "AI 小幫手" };
 const AI_KINDS = { routine: "讀作息表照片", roster: "讀全園班表", bus: "讀娃娃車名單", motor: "讀大肌肉活動規劃", calendar: "讀行事曆", lesson: "推薦學習指標", lessonChat: "AI 寫教案（每一輪）" };
 const AI_COST_NT = { routine: 1, roster: 1, bus: 1, motor: 1, calendar: 3, lesson: 0.8, lessonChat: 2 }; // measured average cost per task (NT$)
-let D = null, U = null, tab = "home", q = "", usort = "cost";
+let D = null, U = null, FB = [], AN = [], tab = "home", q = "", usort = "cost";
 function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 2600); }
 const fd = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 const left = (iso) => Math.ceil((new Date(iso) - Date.now()) / 864e5);
@@ -58,13 +58,14 @@ function subTag(s, via) {
   return `<span class="tag ${cls}">${esc(name)}</span><div class="muted">${l <= 0 ? "已到期（唯讀）" : l > 3650 ? "長期有效" : `到 ${fd(s.ends_at)}・剩 ${l} 天`}${s.seats ? `・${s.seats} 位` : ""}</div><div class="muted">AI 已用 ${s.ai_used}${s.ai_bonus ? `・加購剩 ${s.ai_bonus}` : ""}</div>`;
 }
 async function load() {
-  const [{ data, error }, us] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage")]);
+  const [{ data, error }, us, fb, an] = await Promise.all([SB.rpc("admin_overview"), SB.rpc("admin_usage"), SB.rpc("admin_feedback"), SB.rpc("admin_announcements")]);
+  FB = fb.data || []; AN = an.data || [];
   if (error) { $("gate").hidden = false; $("gate").innerHTML = "讀取失敗：" + esc(error.message); return; }
   D = data; U = us.data || { by_user: {}, by_ws: {}, paid_user: {}, paid_ws: {}, total: {}, by_kind: {}, usd_twd: 32 }; render();
 }
 function render() {
   const pendN = D.payments.filter((p) => p.status === "pending").length;
-  const T = [["home", "總覽"], ["pay", `付款紀錄${pendN ? `（待確認 ${pendN}）` : ""}`], ["usage", "用量與價格"], ["advice", "價格建議"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["set", "設定"]];
+  const T = [["home", "總覽"], ["pay", `付款紀錄${pendN ? `（待確認 ${pendN}）` : ""}`], ["fb", `意見回饋${FB.filter((f) => f.status === "open").length ? `（${FB.filter((f) => f.status === "open").length}）` : ""}`], ["ann", "公告"], ["usage", "用量與價格"], ["advice", "價格建議"], ["users", `老師（${D.users.length}）`], ["ws", `班級（${D.workspaces.length}）`], ["plans", "方案"], ["set", "設定"]];
   $("tabs").innerHTML = T.map(([k, n]) => `<button class="${tab === k ? "on" : ""}" data-t="${k}">${n}</button>`).join("");
   $("tabs").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { tab = b.dataset.t; q = ""; render(); });
   const m = $("main");
@@ -72,6 +73,8 @@ function render() {
   if (tab === "users") m.innerHTML = usersHTML();
   if (tab === "usage") m.innerHTML = usageHTML();
   if (tab === "advice") m.innerHTML = adviceHTML();
+  if (tab === "fb") m.innerHTML = fbHTML();
+  if (tab === "ann") m.innerHTML = annHTML();
   if (tab === "ws") m.innerHTML = wsHTML();
   if (tab === "plans") m.innerHTML = plansHTML();
   if (tab === "pay") m.innerHTML = payHTML();
@@ -157,6 +160,14 @@ function adviceHTML() {
   <div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">每種 AI 工作扣幾點</h3><table style="min-width:560px"><thead><tr><th>AI 工作</th><th>每次成本</th><th>目前扣點</th><th>每點成本</th><th>建議扣點</th><th></th></tr></thead><tbody>${kindRows.map((x) => `<tr><td>${esc(x.name)}${x.real ? `<div class="muted">實際 ${x.calls} 次平均</div>` : '<div class="muted">預估值</div>'}</td><td>${n1(x.callNT)}</td><td>${x.pts} 點</td><td style="color:${x.high ? "var(--bad)" : "inherit"}">${n1(x.perPoint)}</td><td>${x.high ? `<b>${x.sugPts} 點</b>` : '<span class="muted">合適</span>'}</td><td>${x.high ? `<button class="btn s" data-applycost="${x.k}|${x.sugPts}">套用</button>` : ""}</td></tr>`).join("")}</tbody></table><p class="muted" style="margin:8px 0 0">紅字代表這種工作每點的成本明顯比平均高，老師一直用它會吃掉你的毛利，建議多扣幾點。</p></div>
   ${tops.length ? `<div class="card tw"><h3 style="margin:0 0 6px;font-size:15px">AI 點數加購包</h3><table style="min-width:560px"><thead><tr><th>加購包</th><th>目前售價</th><th>每點售價</th><th>建議最低售價</th><th>最壞情況成本</th><th></th></tr></thead><tbody>${tops.map((x) => `<tr><td><b>${esc(x.t.name || "")}</b><div class="muted">${x.t.points} 點</div></td><td>${n(x.t.price)}</td><td>${n1(x.perPoint)}</td><td style="color:${x.bad ? "var(--bad)" : "inherit"};font-weight:${x.bad ? 700 : 400}">${n(x.minP)}</td><td>${n(x.worstP)}</td><td>${x.bad ? `<button class="btn s" data-applytop="${x.i}|${x.minP}">套用</button>` : '<span class="muted">合適</span>'}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
 }
+const FB_CAT = { question: "使用問題", bug: "回報錯誤", idea: "許願／建議", billing: "付款與方案", other: "其他" };
+function fbHTML() {
+  return `<p class="muted" style="margin:0 0 8px">老師送出意見時，你的 LINE 會收到通知。回覆後老師的 LINE 也會收到。</p>${FB.length ? FB.map((f) => `<div class="card" style="${f.status === "open" ? "border:2px solid #efc28a" : ""}"><div class="acts" style="justify-content:space-between;align-items:center"><div><b>${esc(f.name || "老師")}</b> <span class="tag t-none">${esc(FB_CAT[f.category] || f.category)}</span> <span class="tag ${f.status === "open" ? "t-trial" : "t-active"}">${f.status === "open" ? "待處理" : f.status === "replied" ? "已回覆" : "已結案"}</span></div><span class="muted">${new Date(f.created_at).toLocaleString("zh-TW")}</span></div><p style="white-space:pre-wrap;line-height:1.7;margin:8px 0">${esc(f.message)}</p>${f.reply ? `<div class="muted" style="background:var(--blueb);border-radius:10px;padding:8px 10px;white-space:pre-wrap;color:var(--ink)"><b>你的回覆：</b>${esc(f.reply)}</div>` : ""}${f.status !== "closed" ? `<textarea data-fbr="${f.id}" placeholder="輸入回覆（會用 LINE 傳給老師）" style="margin-top:8px;min-height:60px"></textarea><div class="acts" style="margin-top:6px"><button class="btn s" data-fbsend="${f.id}">送出回覆</button><button class="btn o s" data-fbclose="${f.id}">結案</button></div>` : ""}</div>`).join("") : '<div class="card empty">還沒有意見回饋</div>'}`;
+}
+function annHTML() {
+  const row = (a) => `<div class="card" data-an="${a.id || ""}"><div class="row"><label class="f">標題<input data-af="title" value="${esc(a.title || "")}" placeholder="例如：新功能上線！"></label><label class="f">類型<select data-af="level"><option value="info" ${a.level !== "important" ? "selected" : ""}>一般</option><option value="important" ${a.level === "important" ? "selected" : ""}>重要（紅色）</option></select></label><label class="f">開始顯示<input data-af="starts_at" type="date" value="${a.starts_at ? new Date(a.starts_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)}"></label><label class="f">結束顯示（空白＝一直顯示）<input data-af="ends_at" type="date" value="${a.ends_at ? new Date(a.ends_at).toISOString().slice(0, 10) : ""}"></label></div><label class="f">內容<textarea data-af="body" placeholder="例如：課後才藝名單上線了，到選單就能使用…">${esc(a.body || "")}</textarea></label><div class="acts" style="margin-top:8px;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" data-af="active" ${a.active !== false ? "checked" : ""} style="width:auto"> 顯示中</label><button class="btn s" data-ansave="1">保存</button>${a.id ? `<button class="btn o s" data-andel="${a.id}">刪除</button>` : ""}</div></div>`;
+  return `<p class="muted" style="margin:0 0 8px">公告會出現在所有老師的首頁上方，老師按「知道了」後就不會再看到同一則。</p>${row({})}${AN.map(row).join("")}`;
+}
 async function applySetting(key, value, msg) { const { error } = await SB.rpc("admin_save_setting", { p_key: key, p_value: value }); if (error) return toast("失敗：" + error.message); toast(msg); load(); }
 function homeHTML() {
   const subs = [...D.users.map((u) => u.sub), ...D.workspaces.map((w) => w.sub)].filter(Boolean);
@@ -213,6 +224,9 @@ function bind() {
   document.querySelectorAll("[data-applyprice],[data-applypts]").forEach((b) => b.onclick = async () => { const isPrice = !!b.dataset.applyprice, [id, val] = (b.dataset.applyprice || b.dataset.applypts).split("|"), p = { ...D.plans.find((x) => x.id === id) }; if (!confirm(isPrice ? `把「${p.name}」月費改成 NT$${val}？（已經付款的老師不受影響，年繳價格請另外調整）` : `把「${p.name}」每月點數改成 ${val} 點？（下個月起生效）`)) return; if (isPrice) p.price_month = +val; else p.ai_points = +val; delete p.updated_at; const { error } = await SB.rpc("admin_save_plan", { p }); if (error) return toast("失敗：" + error.message); toast("已套用"); load(); });
   document.querySelectorAll("[data-applycost]").forEach((b) => b.onclick = () => { const [k, v] = b.dataset.applycost.split("|"); if (!confirm(`把「${AI_KINDS[k]}」改成每次扣 ${v} 點？`)) return; applySetting("ai_costs", { ...(D.settings.ai_costs || {}), [k]: +v }, "已套用"); });
   document.querySelectorAll("[data-applytop]").forEach((b) => b.onclick = () => { const [i, v] = b.dataset.applytop.split("|"), t = [...(D.settings.topups || [])]; if (!confirm(`把「${t[+i].name}」售價改成 NT$${v}？`)) return; t[+i] = { ...t[+i], price: +v }; applySetting("topups", t, "已套用"); });
+  document.querySelectorAll("[data-fbsend],[data-fbclose]").forEach((b) => b.onclick = async () => { const id = +(b.dataset.fbsend || b.dataset.fbclose), close = !!b.dataset.fbclose, reply = document.querySelector(`[data-fbr="${id}"]`)?.value.trim() || ""; if (!close && !reply) return toast("請輸入回覆"); const { error } = await SB.rpc("admin_reply_feedback", { p_id: id, p_reply: reply, p_close: close }); if (error) return toast("失敗：" + error.message); toast(reply ? "已回覆，老師會收到 LINE" : "已結案"); load(); });
+  document.querySelectorAll("[data-ansave]").forEach((b) => b.onclick = async () => { const box = b.closest("[data-an]"), g = (k) => box.querySelector(`[data-af="${k}"]`); const p = { title: g("title").value.trim(), body: g("body").value.trim(), level: g("level").value, active: g("active").checked, starts_at: g("starts_at").value ? new Date(g("starts_at").value + "T00:00:00+08:00").toISOString() : null, ends_at: g("ends_at").value ? new Date(g("ends_at").value + "T23:59:59+08:00").toISOString() : null }; if (box.dataset.an) p.id = +box.dataset.an; if (!p.title) return toast("請輸入標題"); const { error } = await SB.rpc("admin_save_announcement", { p }); if (error) return toast("失敗：" + error.message); toast("公告已保存"); load(); });
+  document.querySelectorAll("[data-andel]").forEach((b) => b.onclick = async () => { if (!confirm("確定刪除這則公告？")) return; const { error } = await SB.rpc("admin_delete_announcement", { p_id: +b.dataset.andel }); if (error) return toast(error.message); toast("已刪除"); load(); });
   document.querySelectorAll("[data-t2]").forEach((b) => b.onclick = () => { tab = b.dataset.t2; render(); });
   const qi = $("q"); if (qi) { qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; render(); const n = $("q"); n.focus(); n.setSelectionRange(pos, pos); }; }
   document.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => payDialog(...b.dataset.pay.split("|")));

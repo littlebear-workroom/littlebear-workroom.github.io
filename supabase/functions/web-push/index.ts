@@ -74,6 +74,26 @@ async function paymentNotice(id: number, mode: string) {
   return { ok: true };
 }
 
+const FB_CAT: Record<string, string> = { question: "使用問題", bug: "回報錯誤", idea: "許願／建議", billing: "付款與方案", other: "其他" };
+async function feedbackNotice(id: number, mode: string) {
+  const { data: f } = await admin.from("feedback").select("*").eq("id", id).maybeSingle();
+  if (!f) return { ok: false };
+  const { data: who } = await admin.from("profiles").select("display_name, line_user_id").eq("id", f.user_id).maybeSingle();
+  if (mode === "fb_new") {
+    const { data: admins } = await admin.from("admins").select("user_id");
+    const ids = (admins || []).map((a: any) => a.user_id);
+    const { data: profs } = ids.length ? await admin.from("profiles").select("line_user_id").in("id", ids) : { data: [] };
+    const text = `📮 新的意見回饋（${FB_CAT[f.category] || f.category}）\n老師：${who?.display_name || ""}\n\n${String(f.message).slice(0, 800)}\n\n到後台「意見回饋」回覆。`;
+    for (const pr of profs || []) if (pr.line_user_id) await linePush(pr.line_user_id, text);
+    await sendTo(ids, { title: "新的意見回饋", body: `${who?.display_name || "老師"}：${String(f.message).slice(0, 60)}`, view: "home", tag: "fb-" + id });
+  } else {
+    const text = `💌 小熊工作室回覆了你的意見：\n\n「${String(f.message).slice(0, 120)}」\n\n回覆：${f.reply}`;
+    if (who?.line_user_id) await linePush(who.line_user_id, text);
+    await sendTo([f.user_id], { title: "小熊工作室回覆了你", body: String(f.reply).slice(0, 80), view: "login", tag: "fbr-" + id });
+  }
+  return { ok: true };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -87,6 +107,7 @@ Deno.serve(async (req) => {
     }
     if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
     if (body.mode === "pay_notice" || body.mode === "pay_result") return json(await paymentNotice(Number(body.payment), body.mode));
+    if (body.mode === "fb_new" || body.mode === "fb_reply") return json(await feedbackNotice(Number(body.feedback), body.mode));
     const { ws, key, by } = body;
     let label = LABELS[key], logKey = key;
     if (!ws || !label) return json({ ok: true, skipped: "not notified" });

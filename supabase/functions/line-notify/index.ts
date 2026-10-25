@@ -146,6 +146,27 @@ Deno.serve(async (req) => {
 
     if (body.mode === "cron") {
       if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
+      // once a day at 9:00 (Taipei): renewal reminders, deletion warnings, remove expired data
+      let billing: unknown = null;
+      if (now.minutes >= 9 * 60 && now.minutes < 10 * 60) {
+        const { data: last } = await admin.from("app_settings").select("value").eq("key", "billing_job_day").maybeSingle();
+        if (last?.value !== now.iso) {
+          await admin.from("app_settings").upsert({ key: "billing_job_day", value: now.iso });
+          const { data: rem } = await admin.rpc("billing_reminders");
+          let sentR = 0;
+          for (const r of (rem || []) as any[]) {
+            const { data: pr } = await admin.from("profiles").select("line_user_id").eq("id", r.user_id).maybeSingle();
+            if (!pr?.line_user_id) continue;
+            const what = r.class ? `班級「${r.class}」的${r.plan}` : r.trial ? "小熊工作室的免費體驗" : `你的${r.plan}`;
+            const text = r.kind === "renew"
+              ? `⏰ ${what}還有 ${r.days} 天到期（${md(String(r.ends_at).slice(0, 10))}）。\n到期後會變成唯讀，可以查看、匯出，但不能新增或修改。\n續約請打開小熊工作室 →「登入」→「方案與付款」。`
+              : `⚠️ ${what}已經到期，資料會在 ${r.days} 天後依規定刪除。\n需要保留的話，請先續約，或打開小熊工作室匯出資料。`;
+            if ((await push(pr.line_user_id, text)).ok) sentR++;
+          }
+          const { data: purged } = await admin.rpc("purge_expired");
+          billing = { reminders: sentR, purged };
+        }
+      }
       const { data: people } = await admin.from("profiles").select("id, line_user_id").not("line_user_id", "is", null);
       let sent = 0;
       for (const p of people || []) {
@@ -170,7 +191,7 @@ Deno.serve(async (req) => {
           if (text && (await push(p.line_user_id, text)).ok) sent++;
         }
       }
-      return json({ ok: true, sent, at: now });
+      return json({ ok: true, sent, billing, at: now });
     }
     return json({ error: "unknown mode" }, 400);
   } catch (e) {

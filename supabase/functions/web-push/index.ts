@@ -43,6 +43,37 @@ async function sendTo(userIds: string[], payload: Record<string, unknown>) {
   return sent;
 }
 
+async function linePush(to: string, text: string) {
+  const token = Deno.env.get("LINE_MESSAGING_TOKEN");
+  if (!token || !to) return false;
+  const r = await fetch("https://api.line.me/v2/bot/message/push", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ to, messages: [{ type: "text", text: text.slice(0, 4900) }] }) });
+  return r.ok;
+}
+async function paymentNotice(id: number, mode: string) {
+  const { data: p } = await admin.from("payments").select("*").eq("id", id).maybeSingle();
+  if (!p) return { ok: false };
+  const [{ data: payer }, { data: plan }, { data: ws }] = await Promise.all([
+    admin.from("profiles").select("display_name, line_user_id").eq("id", p.paid_by).maybeSingle(),
+    p.plan_id ? admin.from("plans").select("name").eq("id", p.plan_id).maybeSingle() : Promise.resolve({ data: null }),
+    p.subject_type === "workspace" ? admin.from("workspaces").select("name").eq("id", p.subject_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const what = [plan?.name ? `${plan.name}（${p.months === 12 ? "年繳" : p.months + " 個月"}）` : "", p.extra_seats ? `加 ${p.extra_seats} 位老師` : "", p.topup_points ? `加購 ${p.topup_points} 點` : ""].filter(Boolean).join("、");
+  if (mode === "pay_notice") {
+    const { data: admins } = await admin.from("admins").select("user_id");
+    const ids = (admins || []).map((a: any) => a.user_id);
+    const { data: profs } = ids.length ? await admin.from("profiles").select("line_user_id").in("id", ids) : { data: [] };
+    const text = `💰 新的付款通知\n老師：${payer?.display_name || ""}${ws?.name ? `\n班級：${ws.name}` : ""}\n內容：${what}\n金額：NT$${p.amount}\n轉出銀行代碼：${p.from_bank}\n帳號末五碼：${p.from_last5}\n轉帳日期：${p.transfer_date || ""}${p.note ? `\n備註：${p.note}` : ""}\n\n請到後台「付款紀錄」確認收款。`;
+    for (const pr of profs || []) if (pr.line_user_id) await linePush(pr.line_user_id, text);
+    await sendTo(ids, { title: "新的付款通知", body: `${payer?.display_name || "老師"}・NT$${p.amount}・末五碼 ${p.from_last5}`, view: "home", tag: "pay-" + id });
+  } else {
+    const ok = p.status === "paid";
+    const text = ok ? `🎉 小熊工作室已確認收款，${what}已經開通了！\n重新打開小熊工作室就能使用，謝謝你 ♡` : `小熊工作室付款通知被退回：${p.note || "款項核對不符"}\n如果有疑問，請直接聯絡我們。`;
+    if (payer?.line_user_id) await linePush(payer.line_user_id, text);
+    await sendTo([p.paid_by], { title: ok ? "方案已開通 ♡" : "付款通知被退回", body: ok ? `${what}已經開通，重新打開 App 就能使用` : p.note || "款項核對不符", view: "login", tag: "payres-" + id });
+  }
+  return { ok: true };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -55,6 +86,7 @@ Deno.serve(async (req) => {
       return n ? json({ ok: true, sent: n }) : json({ error: "這支手機還沒開啟通知" }, 400);
     }
     if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
+    if (body.mode === "pay_notice" || body.mode === "pay_result") return json(await paymentNotice(Number(body.payment), body.mode));
     const { ws, key, by } = body;
     let label = LABELS[key], logKey = key;
     if (!ws || !label) return json({ ok: true, skipped: "not notified" });

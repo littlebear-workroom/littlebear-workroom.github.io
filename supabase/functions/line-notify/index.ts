@@ -159,6 +159,8 @@ Deno.serve(async (req) => {
 
     if (body.mode === "cron") {
       if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
+      // medicine reminders go out as phone notifications from the web-push function
+      try { await fetch(Deno.env.get("SUPABASE_URL") + "/functions/v1/web-push", { method: "POST", headers: { "Content-Type": "application/json", "x-cron-secret": Deno.env.get("CRON_SECRET")! }, body: JSON.stringify({ mode: "med_due" }) }); } catch (e) { console.log("med_due", String(e)); }
       // once a day at 9:00 (Taipei): renewal reminders, deletion warnings, remove expired data
       let billing: unknown = null;
       if (now.minutes >= 9 * 60 && now.minutes < 10 * 60) {

@@ -19,6 +19,12 @@ const slot = obj({ start: { ...str, description: "HH:MM 24-hour" }, end: { ...st
 
 const int = { type: "integer" };
 const KINDS: Record<string, { schema: unknown; task: (ctx: any) => string; textOnly?: boolean; effort?: string; adminOnly?: boolean }> = {
+  // handwritten sticky note → short to-do text
+  sticky: {
+    effort: "low",
+    schema: obj({ title: { ...str, description: "the note as a short to-do title in Traditional Chinese, <= 40 字" }, detail: { ...str, description: "anything else written on the note, else empty" } }),
+    task: () => "這是幼兒園老師用手指在手機上寫的便利貼。請把上面寫的字讀出來，整理成一句待辦事項的標題（繁體中文，40 字內），其他內容放 detail。看不清楚的字依上下文判斷，不要加入沒寫的內容。",
+  },
   // admin back office: design the plan ladder (features per plan + prices). Not charged to points.
   planAdvice: {
     textOnly: true,

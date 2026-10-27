@@ -128,6 +128,29 @@ async function announce(id: number, userId: string, again: boolean) {
   return { status: 200, body: { ok: true, push: pushN, line: lineN } };
 }
 
+// 用藥提醒: called by the 5-minute cron. Tells the class when a dose is due and not yet given.
+async function medsDue() {
+  const t = new Date(Date.now() + 8 * 3600e3), today = t.toISOString().slice(0, 10), nowMin = t.getUTCHours() * 60 + t.getUTCMinutes();
+  const { data: rows } = await admin.from("shared_data").select("workspace_id, value").eq("key", "bear_meds");
+  let sent = 0;
+  for (const r of rows || []) {
+    const due = (Array.isArray(r.value) ? r.value : []).filter((m: any) => {
+      if (!m || m.date !== today || m.givenAt || !/^\d{2}:\d{2}$/.test(m.time || "")) return false;
+      const mm = +m.time.slice(0, 2) * 60 + +m.time.slice(3);
+      return mm <= nowMin && nowMin - mm < 30;
+    });
+    for (const m of due) {
+      const logKey = "med#" + m.id;
+      const { data: last } = await admin.from("push_log").select("sent_at").eq("workspace_id", r.workspace_id).eq("key", logKey).maybeSingle();
+      if (last) continue;
+      await admin.from("push_log").upsert({ workspace_id: r.workspace_id, key: logKey, sent_at: new Date().toISOString() });
+      const { data: members } = await admin.from("workspace_members").select("user_id").eq("workspace_id", r.workspace_id).eq("status", "active");
+      sent += await sendTo((members || []).map((x: any) => x.user_id), { title: "💊 用藥時間到了", body: `${m.kid || "寶貝"} ${m.time} ${m.med || ""}${m.dose ? "・" + m.dose : ""}，餵完記得在 App 按「已餵藥」`, view: "home", tag: logKey });
+    }
+  }
+  return { ok: true, sent };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -147,6 +170,7 @@ Deno.serve(async (req) => {
       return json(r.body, r.status);
     }
     if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) return json({ error: "forbidden" }, 403);
+    if (body.mode === "med_due") return json(await medsDue());
     if (body.mode === "pay_notice" || body.mode === "pay_result") return json(await paymentNotice(Number(body.payment), body.mode));
     if (body.mode === "fb_new" || body.mode === "fb_reply") return json(await feedbackNotice(Number(body.feedback), body.mode));
     const { ws, key, by } = body;

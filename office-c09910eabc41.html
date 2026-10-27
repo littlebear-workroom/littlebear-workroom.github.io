@@ -53,7 +53,7 @@ textarea[data-af=body]{min-height:170px;resize:vertical}
 <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="features.js?v=20261027205005"></script>
+<script src="features.js?v=20261027210209"></script>
 <script>
 // Read before LINE's SDK tidies the address bar: set when the login was started from the home-screen app.
 const BOOT_PAIR = (() => { let t = location.search + location.hash, v = ""; for (let i = 0; i < 4 && !v; i++) { v = ((/pair(?:=|%3D)([A-Za-z0-9]{24,64})/i.exec(t) || [])[1]) || ""; try { t = decodeURIComponent(t); } catch { break; } } try { if (v) sessionStorage.setItem("adm_boot_pair", v); else v = sessionStorage.getItem("adm_boot_pair") || ""; } catch {} return v; })();

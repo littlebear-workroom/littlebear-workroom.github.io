@@ -5,7 +5,7 @@
 // Every front-end update also gets a note in BEAR_RELEASES (bottom): the admin panel turns new notes into announcements.
 window.BEAR_FEATURES = [
   // key        name                    menu views                 data it saves
-  { key: "tasks",       name: "待辦清單",           views: ["tasks"],               data: ["bear_tasks"] , desc: "個人待辦清單，可分類、排優先、逾期自動移到今天" },
+  { key: "tasks",       name: "待辦清單",           views: ["tasks"],               data: ["bear_tasks", "bear_stickies"] , desc: "個人待辦清單，可分類、排優先、逾期自動移到今天；右下角＋可以手寫便利貼，再一鍵轉成待辦" },
   { key: "calendar",    name: "行事曆",             views: ["calendar"],            data: ["bear_cal_events", "bear_cal_plans"] , desc: "整學期/當月行事曆，AI 讀園所行事曆照片匯入，標出我負責的工作" },
   { key: "chores",      name: "例行公事",           views: ["chores"],              data: ["bear_chores"] , desc: "週誌、月報等定期要做的事的提醒" },
   { key: "schedule",    name: "我的上下班時間",     views: ["schedule"],            data: ["bear_schedules"] , desc: "我的上下班時間，首頁倒數下班；值班會從全園班表帶入" },
@@ -18,7 +18,7 @@ window.BEAR_FEATURES = [
   { key: "writer",      name: "AI 文字小幫手",      views: ["writer"],              data: [] , desc: "AI 文字小幫手：寫家長通知、週誌/月報草稿" },
   { key: "students",    name: "學生名冊",           views: ["students"],            data: ["bear_student_records"] , desc: "學生名冊、緊急聯絡人、健康注意事項、生日，可匯出 Excel" },
   { key: "attendance",  name: "出缺勤點名",         views: ["attendance"],          data: ["bear_attendance"] , desc: "每日點名與出席統計" },
-  { key: "supplies",    name: "寶貝補給品",         views: ["supplies"],            data: [] , desc: "寶貝補給品：每位幼兒衣物、尿布數量，低於安全量提醒" },
+  { key: "supplies",    name: "寶貝補給品",         views: ["supplies"],            data: ["bear_supply_settings"] , desc: "寶貝補給品：每位幼兒衣物、尿布數量，老師自訂低於幾件提醒，一鍵複製請家長補充的訊息" },
   { key: "forms",       name: "回條小幫手",         views: ["forms"],               data: ["bear_forms"] , desc: "回條小幫手：回條、繳費、同意書勾選統計" },
   { key: "afterschool", name: "課後才藝",           views: ["afterschool"],         data: ["bear_afterschool"] , desc: "課後才藝名單與上課準備提醒" },
   { key: "bus",         name: "娃娃車名單",         views: ["bus"],                 data: ["bear_bus_routes", "bear_bus_riders"] , desc: "娃娃車名單：車次、搭車順序、聯絡人，AI 讀名單" },
@@ -50,4 +50,6 @@ window.BEAR_RELEASES = [
     body: "「請假攻略」升級了！\n・長按日期就能多選：按住不放再滑動，一次選好幾天；也可以一天一天點選\n・多選的日期會用同一種假別一起登記\n・需要代班交接單時，會列出每一天的交接事項，可以直接修改\n・還沒確定的日子可以先跳過，請假前一週會提醒你建立" },
   { id: "2026-10-26-ai-members", features: ["ai"], title: "新功能上線",
     body: "班級 AI 點數看得更清楚了！\n・同班有兩位以上老師時，「帳號管理」的方案卡片會顯示本月每位老師用了多少點\n・全班老師共用同一份點數，大家一起看用量，分配更安心" },
+  { id: "2026-10-27-sticky-supplies", features: ["tasks", "supplies"], title: "新功能上線",
+    body: "今天的更新：\n・右下角「＋」變成便利貼：用手指直接寫下來就好，之後一鍵加入待辦清單\n・首頁寶貝補給品只列名字，點名字就能看到要補多少，並一鍵複製訊息給家長\n・補給品可以自己設定低於幾件才提醒；尿布可設定低於幾片提醒、一次補一袋或幾片\n・包尿布的孩子可以勾選要不要準備內褲\n・「今天要特別注意的孩子」改成顯示今天的狀況：點名時在備註寫下（例如咳嗽、要吃藥）就會出現" },
 ];
